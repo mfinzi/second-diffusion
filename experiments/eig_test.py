@@ -1,7 +1,8 @@
 from jax.random import normal
 from jax.random import PRNGKey
 import cola
-from experiments.experiment_fns import log_spectrum_results
+import os
+from experiment_fns import log_spectrum_results
 
 key = PRNGKey(seed=42)
 # N = 1000
@@ -14,6 +15,9 @@ H = cola.SelfAdjoint(H)
 
 results = []
 output_path = "./logs/eigs.pkl"
+if not os.path.exists('./logs'):
+    os.mkdir('./logs')
+
 log_spectrum_results(H, alg=cola.Eigh(), results=results, output_path=output_path)
 
 max_iters = 10
