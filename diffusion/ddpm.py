@@ -64,18 +64,14 @@ class DDPM(nn.Module):
         num_resolutions = len(ch_mult)
 
         AttnBlock = functools.partial(layers.AttnBlock, normalize=normalize)
-        ResnetBlock = functools.partial(
-            ResnetBlockDDPM, act=act, normalize=normalize, dropout=dropout
-        )
+        ResnetBlock = functools.partial(ResnetBlockDDPM, act=act, normalize=normalize, dropout=dropout)
 
         if config.model.conditional:
             # timestep/scale embedding
             timesteps = labels
             temb = layers.get_timestep_embedding(timesteps, nf)
             temb = nn.Dense(nf * 4, kernel_init=default_initializer())(temb)
-            temb = nn.Dense(nf * 4, kernel_init=default_initializer())(
-                act(temb)
-            )
+            temb = nn.Dense(nf * 4, kernel_init=default_initializer())(act(temb))
         else:
             temb = None
 
@@ -91,9 +87,7 @@ class DDPM(nn.Module):
         for i_level in range(num_resolutions):
             # Residual blocks for this resolution
             for i_block in range(num_res_blocks):
-                h = ResnetBlock(out_ch=nf * ch_mult[i_level])(
-                    hs[-1], temb, train
-                )
+                h = ResnetBlock(out_ch=nf * ch_mult[i_level])(hs[-1], temb, train)
                 if h.shape[1] in attn_resolutions:
                     h = AttnBlock()(h)
                 hs.append(h)
@@ -108,9 +102,7 @@ class DDPM(nn.Module):
         # Upsampling block
         for i_level in reversed(range(num_resolutions)):
             for i_block in range(num_res_blocks + 1):
-                h = ResnetBlock(out_ch=nf * ch_mult[i_level])(
-                    jnp.concatenate([h, hs.pop()], axis=-1), temb, train
-                )
+                h = ResnetBlock(out_ch=nf * ch_mult[i_level])(jnp.concatenate([h, hs.pop()], axis=-1), temb, train)
             if h.shape[1] in attn_resolutions:
                 h = AttnBlock()(h)
             if i_level != 0:
@@ -125,9 +117,7 @@ class DDPM(nn.Module):
             # Divide the output by sigmas. Useful for training with the NCSN loss.
             # The DDPM loss scales the network output by sigma in the loss function,
             # so no need of doing it here.
-            used_sigmas = sigmas[labels].reshape(
-                (x.shape[0], *([1] * len(x.shape[1:])))
-            )
+            used_sigmas = sigmas[labels].reshape((x.shape[0], *([1] * len(x.shape[1:]))))
             h = h / used_sigmas
 
         return h

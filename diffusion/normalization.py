@@ -12,7 +12,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Normalization layers."""
 import flax.linen as nn
 import functools
@@ -59,9 +58,7 @@ class VarianceNorm2d(nn.Module):
         variance = jnp.var(x, axis=(1, 2), keepdims=True)
         h = x / jnp.sqrt(variance + 1e-5)
 
-        h = h * self.param(
-            "scale", VarianceNorm2d.scale_init, (1, 1, 1, x.shape[-1])
-        )
+        h = h * self.param("scale", VarianceNorm2d.scale_init, (1, 1, 1, x.shape[-1]))
         if self.bias:
             h = h + self.param("bias", init.zeros, (1, 1, 1, x.shape[-1]))
 
@@ -102,16 +99,11 @@ class InstanceNorm2dPlus(nn.Module):
         v = jnp.var(means, axis=-1, keepdims=True)
         means_plus = (means - m) / jnp.sqrt(v + 1e-5)
 
-        h = (x - means[:, None, None, :]) / jnp.sqrt(
-            jnp.var(x, axis=(1, 2), keepdims=True) + 1e-5
-        )
+        h = (x - means[:, None, None, :]) / jnp.sqrt(jnp.var(x, axis=(1, 2), keepdims=True) + 1e-5)
 
-        h = h + means_plus[:, None, None, :] * self.param(
-            "alpha", InstanceNorm2dPlus.scale_init, (1, 1, 1, x.shape[-1])
-        )
-        h = h * self.param(
-            "gamma", InstanceNorm2dPlus.scale_init, (1, 1, 1, x.shape[-1])
-        )
+        h = h + means_plus[:, None, None, :] * self.param("alpha", InstanceNorm2dPlus.scale_init,
+                                                          (1, 1, 1, x.shape[-1]))
+        h = h * self.param("gamma", InstanceNorm2dPlus.scale_init, (1, 1, 1, x.shape[-1]))
         if self.bias:
             h = h + self.param("beta", init.zeros, (1, 1, 1, x.shape[-1]))
 
@@ -130,19 +122,14 @@ class ConditionalInstanceNorm2dPlus(nn.Module):
         m = jnp.mean(means, axis=-1, keepdims=True)
         v = jnp.var(means, axis=-1, keepdims=True)
         means_plus = (means - m) / jnp.sqrt(v + 1e-5)
-        h = (x - means[:, None, None, :]) / jnp.sqrt(
-            jnp.var(x, axis=(1, 2), keepdims=True) + 1e-5
-        )
+        h = (x - means[:, None, None, :]) / jnp.sqrt(jnp.var(x, axis=(1, 2), keepdims=True) + 1e-5)
         normal_init = init.normal(0.02)
         zero_init = init.zeros
         if self.bias:
 
             def init_embed(key, shape, dtype=jnp.float32):
                 feature_size = shape[1] // 3
-                normal = (
-                    normal_init(key, (shape[0], 2 * feature_size), dtype=dtype)
-                    + 1.0
-                )
+                normal = (normal_init(key, (shape[0], 2 * feature_size), dtype=dtype) + 1.0)
                 zero = zero_init(key, (shape[0], feature_size), dtype=dtype)
                 return jnp.concatenate([normal, zero], axis=-1)
 

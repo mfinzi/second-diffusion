@@ -8,7 +8,6 @@ from utils import batch_mul
 
 class SDE(abc.ABC):
     """SDE abstract class. Functions are designed for a mini-batch of inputs."""
-
     def __init__(self, N):
         """Construct an SDE.
 
@@ -101,11 +100,7 @@ class SDE(abc.ABC):
                     score * (0.5 if self.probability_flow else 1.0),
                 )
                 # Set the diffusion function to zero for ODEs.
-                diffusion = (
-                    jnp.zeros_like(diffusion)
-                    if self.probability_flow
-                    else diffusion
-                )
+                diffusion = (jnp.zeros_like(diffusion) if self.probability_flow else diffusion)
                 return drift, diffusion
 
             def discretize(self, x, t):
@@ -151,10 +146,7 @@ class VPSDE(SDE):
         return drift, diffusion
 
     def marginal_prob(self, x, t):
-        log_mean_coeff = (
-            -0.25 * t**2 * (self.beta_1 - self.beta_0)
-            - 0.5 * t * self.beta_0
-        )
+        log_mean_coeff = (-0.25 * t**2 * (self.beta_1 - self.beta_0) - 0.5 * t * self.beta_0)
         mean = batch_mul(jnp.exp(log_mean_coeff), x)
         std = jnp.sqrt(1 - jnp.exp(2.0 * log_mean_coeff))
         return mean, std
@@ -165,9 +157,7 @@ class VPSDE(SDE):
     def prior_logp(self, z):
         shape = z.shape
         N = np.prod(shape[1:])
-        logp_fn = (
-            lambda z: -N / 2.0 * jnp.log(2 * np.pi) - jnp.sum(z**2) / 2.0
-        )
+        logp_fn = (lambda z: -N / 2.0 * jnp.log(2 * np.pi) - jnp.sum(z**2) / 2.0)
         return jax.vmap(logp_fn)(z)
 
     def discretize(self, x, t):
@@ -202,17 +192,12 @@ class subVPSDE(SDE):
     def sde(self, x, t):
         beta_t = self.beta_0 + t * (self.beta_1 - self.beta_0)
         drift = -0.5 * batch_mul(beta_t, x)
-        discount = 1.0 - jnp.exp(
-            -2 * self.beta_0 * t - (self.beta_1 - self.beta_0) * t**2
-        )
+        discount = 1.0 - jnp.exp(-2 * self.beta_0 * t - (self.beta_1 - self.beta_0) * t**2)
         diffusion = jnp.sqrt(beta_t * discount)
         return drift, diffusion
 
     def marginal_prob(self, x, t):
-        log_mean_coeff = (
-            -0.25 * t**2 * (self.beta_1 - self.beta_0)
-            - 0.5 * t * self.beta_0
-        )
+        log_mean_coeff = (-0.25 * t**2 * (self.beta_1 - self.beta_0) - 0.5 * t * self.beta_0)
         mean = batch_mul(jnp.exp(log_mean_coeff), x)
         std = 1 - jnp.exp(2.0 * log_mean_coeff)
         return mean, std
@@ -223,9 +208,7 @@ class subVPSDE(SDE):
     def prior_logp(self, z):
         shape = z.shape
         N = np.prod(shape[1:])
-        logp_fn = (
-            lambda z: -N / 2.0 * jnp.log(2 * np.pi) - jnp.sum(z**2) / 2.0
-        )
+        logp_fn = (lambda z: -N / 2.0 * jnp.log(2 * np.pi) - jnp.sum(z**2) / 2.0)
         return jax.vmap(logp_fn)(z)
 
 
@@ -241,9 +224,7 @@ class VESDE(SDE):
         super().__init__(N)
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
-        self.discrete_sigmas = jnp.exp(
-            np.linspace(np.log(self.sigma_min), np.log(self.sigma_max), N)
-        )
+        self.discrete_sigmas = jnp.exp(np.linspace(np.log(self.sigma_min), np.log(self.sigma_max), N))
         self.N = N
 
     @property
@@ -251,15 +232,13 @@ class VESDE(SDE):
         return 1
 
     def sde(self, x, t):
-        sigma = self.sigma_min * (self.sigma_max / self.sigma_min) ** t
+        sigma = self.sigma_min * (self.sigma_max / self.sigma_min)**t
         drift = jnp.zeros_like(x)
-        diffusion = sigma * jnp.sqrt(
-            2 * (jnp.log(self.sigma_max) - jnp.log(self.sigma_min))
-        )
+        diffusion = sigma * jnp.sqrt(2 * (jnp.log(self.sigma_max) - jnp.log(self.sigma_min)))
         return drift, diffusion
 
     def marginal_prob(self, x, t):
-        std = self.sigma_min * (self.sigma_max / self.sigma_min) ** t
+        std = self.sigma_min * (self.sigma_max / self.sigma_min)**t
         mean = x
         return mean, std
 
@@ -269,9 +248,10 @@ class VESDE(SDE):
     def prior_logp(self, z):
         shape = z.shape
         N = np.prod(shape[1:])
-        logp_fn = lambda z: -N / 2.0 * jnp.log(
-            2 * np.pi * self.sigma_max**2
-        ) - jnp.sum(z**2) / (2 * self.sigma_max**2)
+
+        def logp_fn(z):
+            return -N / 2.0 * jnp.log(2 * np.pi * self.sigma_max**2) - jnp.sum(z**2) / (2 * self.sigma_max**2)
+
         return jax.vmap(logp_fn)(z)
 
     def discretize(self, x, t):
