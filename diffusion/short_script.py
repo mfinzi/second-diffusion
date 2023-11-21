@@ -1,4 +1,5 @@
 from cola import CG, Lanczos, PowerIteration
+from experiments.experiment_fns import log_from_jax
 from functools import partial
 import gdown
 import utils
@@ -87,7 +88,7 @@ x = sde.prior_sampling(step_rng, shape)
 timesteps = jnp.linspace(sde.T, 1e-3, sde.N)
 score_fn = mutils.get_score_fn(sde, score_model, new_params, state.model_state, train=False,
                                continuous=config.training.continuous)
-rsde = sde.reverse(score_fn, False)
+breakpoint()
 
 i = 0
 target_snr = 0.16
@@ -95,6 +96,10 @@ n_steps = 2000
 
 key = jr.PRNGKey(101)
 x_pi = jr.normal(key, (32, 32, 3))
+results = []
+output_path = "./logs/eigs.pkl"
+if not os.path.exists('./logs'):
+    os.mkdir('./logs')
 
 
 def flat_score_fn(x, t):
@@ -110,12 +115,13 @@ def score_hessian(x, t):
 
 def get_matrices(x, t, key):
     H = score_hessian(x.reshape(-1), t)
-    print(H.shape)
-    breakpoint()
     P = cola.ops.I_like(H)
     eps = 1e-2 * cola.eigmax(H, alg=PowerIteration(max_iter=5))
 
     reg_H = cola.PSD(H + eps * cola.ops.I_like(H))
+    # log_spectrum_results(H, alg, results, output_path)
+    # log_from_jax(H, results, output_path)
+    log_from_jax(reg_H, results, output_path)
     inv_H = cola.linalg.inv(reg_H, alg=CG(max_iters=10, P=P))
     isqrt_H = cola.linalg.isqrt(reg_H, alg=Lanczos(max_iters=10))
     return inv_H, isqrt_H

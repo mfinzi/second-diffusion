@@ -4,6 +4,17 @@ import cola
 from cola.linalg.decompositions.lanczos import lanczos_eigs
 
 
+def log_from_jax(A, results, output_path):
+    tic = time.time()
+    xnp = A.xnp
+    eigvals, _ = xnp.eigh(A.to_dense())
+    toc = time.time()
+    out = {"eigvals": eigvals, "time": toc - tic, "method": "cholesky"}
+    results.append(out)
+    save_object(results, output_path)
+    print("Saved")
+
+
 def log_spectrum_results(A, alg, results, output_path):
     out = get_spectrum_results(A, alg=alg)
     results.append(out)
