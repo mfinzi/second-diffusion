@@ -1,22 +1,35 @@
-from cola import CG, Lanczos, PowerIteration
+from cola import Auto, CG, Lanczos, PowerIteration
 from functools import partial
 import gdown
-import diffusion.utils as utils
+import utils
 import datasets
-import diffusion.mutils as mutils
-from diffusion.sde_lib import VPSDE
-from diffusion.configs import get_config
+from sampling import EulerMaruyamaPredictor, LangevinCorrector, get_pc_sampler
+import mutils
+from sde_lib import VPSDE
+from configs import get_config
 from IPython import display
 import cola
 import flax
+import diffrax as dfx
+import einops as ein
+import equinox as eqx
+from jaxtyping import Key, Array, Float32, jaxtyped
+import optax
+import jax.tree_util as jtu
 import jax.random as jr
 import jax.numpy as jnp
 import jax
 import matplotlib.pyplot as plt
+import numpy as np
+import functools as ft
+from typing import Optional, Union
+from collections.abc import Callable
+import math
+import ddpm
 import os
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # see issue #152
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 TESTING = True
 RETRAIN_MODEL = True
@@ -33,20 +46,28 @@ key = jr.PRNGKey(SEED)
 # torch.manual_seed(3)
 # dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-
 if not os.path.exists('checkpoint_26'):
+    # Replace 'FILE_ID' with the actual file ID
     file_id = '1VZikdcPE2nn8K_da9UUG_JPIzNIRI4yE'
+
+    # Specify the output file name
     output_file = 'checkpoint_26'
+
+    # Download the file
     gdown.download(f'https://drive.google.com/uc?id={file_id}', output_file, quiet=False)
 
 if not os.path.exists('checkpoint_199'):
+    # Replace 'FILE_ID' with the actual file ID
     file_id = '15VofLMDaxqUKnKwLDzvbDbCpCBm4nUOV'
+
+    # Specify the output file name
     output_file = 'checkpoint_199'
+
+    # Download the file
     gdown.download(f'https://drive.google.com/uc?id={file_id}', output_file, quiet=False)
 
 config = get_config()
-sde = VPSDE(beta_min=config.model.beta_min,
-            beta_max=config.model.beta_max, N=config.model.num_scales)
+sde = VPSDE(beta_min=config.model.beta_min, beta_max=config.model.beta_max, N=config.model.num_scales)
 sampling_eps = 1e-3
 
 batch_size = 64
@@ -62,12 +83,8 @@ score_model, init_model_state, initial_params = mutils.init_model(run_rng, confi
 # optimizer = losses_lib.get_optimizer(config).create(initial_params)
 optimizer = None
 
-state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr,
-                     model_state=init_model_state,
-                     ema_rate=config.model.ema_rate,
-                     params_ema=initial_params,
-                     rng=rng)  # pytype: disable=wrong-keyword-args
-breakpoint()
+state = mutils.State(step=0, optimizer=optimizer, lr=config.optim.lr, model_state=init_model_state,
+                     ema_rate=config.model.ema_rate, params_ema=initial_params, rng=rng)  # pytype: disable=wrong-keyword-args
 sigmas = mutils.get_sigmas(config)
 scaler = datasets.get_data_scaler(config)
 inverse_scaler = datasets.get_data_inverse_scaler(config)
@@ -79,8 +96,7 @@ def reshape_tree(tree):
     for k, v in tree.items():
         if isinstance(v, dict) or isinstance(v, flax.core.FrozenDict):
             if 'GroupNorm' in k or 'bn' in k:
-                reshaped_tree[k] = v.copy(
-                    {"scale": v["scale"].reshape(-1), "bias": v["bias"].reshape(-1)})
+                reshaped_tree[k] = v.copy({"scale": v["scale"].reshape(-1), "bias": v["bias"].reshape(-1)})
             else:
                 reshaped_tree[k] = reshape_tree(v)
         else:
@@ -102,8 +118,8 @@ rng = jax.random.PRNGKey(random_seed)
 rng, step_rng = jax.random.split(rng)
 x = sde.prior_sampling(step_rng, shape)
 timesteps = jnp.linspace(sde.T, 1e-3, sde.N)
-score_fn = mutils.get_score_fn(sde, score_model, new_params, state.model_state,
-                               train=False, continuous=config.training.continuous)
+score_fn = mutils.get_score_fn(sde, score_model, new_params, state.model_state, train=False,
+                               continuous=config.training.continuous)
 rsde = sde.reverse(score_fn, False)
 
 i = 0
@@ -116,7 +132,6 @@ i = 0
 #     x_mean = x + drift * dt
 #     x = x_mean + utils.batch_mul(diffusion, jnp.sqrt(-dt) * z)
 #     return x, x_mean, rng
-
 
 # for i in range(sde.N):
 #     t = timesteps[i]
@@ -140,7 +155,7 @@ def annealed_langevin(x, t, dt, rng):
         grad = score_fn(x, t)
         rng, step_rng = jax.random.split(rng)
         noise = jax.random.normal(step_rng, x.shape)
-        step_size = (target_snr * std) ** 2 * 2 * alpha
+        step_size = (target_snr * std)**2 * 2 * alpha
         x_mean = x + utils.batch_mul(step_size, grad)
         x = x_mean + utils.batch_mul(noise, jnp.sqrt(step_size * 2))
         return rng, x, x_mean
@@ -158,7 +173,7 @@ def make_step(x_pi, t, key):
     # Calculate step size
     alpha = sde.alphas[t]
     std = sde.marginal_prob(x_pi[None, ...], jnp.ones(1) * t / (sde.N - 1))[1]
-    step_size = (target_snr * std) ** 2 * 2 * alpha
+    step_size = (target_snr * std)**2 * 2 * alpha
 
     # Calculate score
     score = score_fn(x_pi[None, ...], jnp.ones(1) * t / (sde.N - 1))
@@ -186,7 +201,6 @@ image1 = ax1.imshow(inverse_scaler(x_pi))
 display.clear_output(wait=True)
 image1.set_data(inverse_scaler(x_pi))
 display.display(plt.gcf())
-
 
 for step in range(n_steps):
     # Setup
@@ -272,6 +286,7 @@ def score_hessian(x, t):
     H1 = cola.ops.Jacobian(partial(flat_score_fn, t=t), x)
     return cola.PSD(-(H1.T + H1) / 2)
 
+
 # @jax.jit
 
 
@@ -298,7 +313,7 @@ def make_step(x_pi, t, key):
     # Calculate step size
     alpha = sde.alphas[t]
     std = sde.marginal_prob(x_pi[None, ...], jnp.ones(1) * t / (sde.N - 1))[1]
-    step_size = (target_snr * std) ** 2 * 2 * alpha
+    step_size = (target_snr * std)**2 * 2 * alpha
 
     # Calculate score
     score = score_fn(x_pi[None, ...], jnp.ones(1) * t / (sde.N - 1))
@@ -311,8 +326,7 @@ def make_step(x_pi, t, key):
     inv_H, isqrt_H = get_matrices(x_pi, t / (sde.N - 1), pkey)
     # Langevin update
     x_mean = x_pi + utils.batch_mul(step_size, (inv_H @ score.reshape(-1)).reshape(score.shape))
-    x_pi = x_mean + utils.batch_mul((isqrt_H @ noise.reshape(-1)
-                                     ).reshape(noise.shape), jnp.sqrt(step_size * 2))
+    x_pi = x_mean + utils.batch_mul((isqrt_H @ noise.reshape(-1)).reshape(noise.shape), jnp.sqrt(step_size * 2))
     x_pi = x_pi[0]
     return x_pi, key
 
@@ -327,7 +341,6 @@ x_pi = jr.normal(key, (32, 32, 3))
 display.clear_output(wait=True)
 image1.set_data(inverse_scaler(x_pi))
 display.display(plt.gcf())
-
 
 for step in range(n_steps):
 
@@ -365,7 +378,6 @@ invH, isqrtH = get_matrices(x, 1 - 10 / sde.N, key)
 invH
 
 x = jr.normal(key, (32, 32, 3))
-e, v = cola.eig(score_hessian(x.reshape(-1), 1 - 10 / sde.N),
-                k=10, which='SM', alg=Lanczos(max_iters=30))
+e, v = cola.eig(score_hessian(x.reshape(-1), 1 - 10 / sde.N), k=10, which='SM', alg=Lanczos(max_iters=30))
 
 e
