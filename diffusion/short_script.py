@@ -1,5 +1,6 @@
 from cola import CG, Lanczos, PowerIteration
-from experiments.experiment_fns import log_spectrum_results
+# from experiments.experiment_fns import log_spectrum_results
+from experiments.experiment_fns import log_from_jax
 from functools import partial
 import gdown
 import utils
@@ -132,8 +133,8 @@ def get_matrices(x, t, key):
     eps = 1e-2 * cola.eigmax(H, alg=PowerIteration(max_iter=5))
 
     reg_H = cola.PSD(H + eps * cola.ops.I_like(H))
-    log_spectrum_results(H, Lanczos(max_iters=20, tol=1e-3), results, output_path)
-    # log_from_jax(reg_H, results, output_path)
+    # log_spectrum_results(H, Lanczos(max_iters=20, tol=1e-3), results, output_path)
+    log_from_jax(reg_H, results, output_path)
     inv_H = cola.linalg.inv(reg_H, alg=CG(max_iters=10, P=P))
     isqrt_H = cola.linalg.isqrt(reg_H, alg=Lanczos(max_iters=10))
     return inv_H, isqrt_H

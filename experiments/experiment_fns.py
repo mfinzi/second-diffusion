@@ -1,17 +1,19 @@
 import time
-import pickle
+import numpy as np
+from trainkit.saving import append_timestamp
+from trainkit.saving import save_object
 import cola
 from cola.linalg.decompositions.lanczos import lanczos_eigs
 
 
-def log_from_jax(A, results, output_path):
+def log_from_jax(A, output_path):
     tic = time.time()
     xnp = A.xnp
     eigvals, _ = xnp.eigh(A.to_dense())
+    # eigvals = xnp.zeros(A.shape, device=A.device, dtype=A.dtype)
     toc = time.time()
-    out = {"eigvals": eigvals, "time": toc - tic, "method": "cholesky"}
-    results.append(out)
-    save_object(results, output_path)
+    out = {"eigvals": np.array(eigvals), "time": toc - tic, "method": "cholesky"}
+    save_object(out, append_timestamp(output_path, True))
     print("*=" * 50 + "\nSaved\n" + "*=" * 50)
 
 
@@ -32,9 +34,3 @@ def get_spectrum_results(A, alg):
         method_name = "cholesky"
     toc = time.time()
     return {"eigvals": eigvals, "time": toc - tic, "method": method_name}
-
-
-def save_object(obj, filepath, use_highest=True):
-    protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
-    with open(file=filepath, mode='wb') as f:
-        pickle.dump(obj=obj, file=f, protocol=protocol)
