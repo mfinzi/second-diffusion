@@ -88,7 +88,17 @@ x = sde.prior_sampling(step_rng, shape)
 timesteps = jnp.linspace(sde.T, 1e-3, sde.N)
 score_fn = mutils.get_score_fn(sde, score_model, new_params, state.model_state, train=False,
                                continuous=config.training.continuous)
-breakpoint()
+
+key = jr.PRNGKey(101)
+diag = jnp.abs(jr.normal(key, (3072,)))
+
+
+def score_fn(x, _):
+    shape = x.shape
+    out = -x.reshape(-1)
+    out = diag * out
+    return out.reshape(shape)
+
 
 i = 0
 target_snr = 0.16
@@ -110,7 +120,9 @@ def flat_score_fn(x, t):
 
 def score_hessian(x, t):
     H1 = cola.ops.Jacobian(partial(flat_score_fn, t=t), x)
-    return cola.PSD(-(H1.T + H1) / 2)
+    out = -(H1.T + H1) / 2
+    # out = H1.T @ H1
+    return out
 
 
 def get_matrices(x, t, key):

@@ -12,7 +12,7 @@ def log_from_jax(A, results, output_path):
     out = {"eigvals": eigvals, "time": toc - tic, "method": "cholesky"}
     results.append(out)
     save_object(results, output_path)
-    print("Saved")
+    print("*=" * 50 + "\nSaved\n" + "*=" * 50)
 
 
 def log_spectrum_results(A, alg, results, output_path):
