@@ -1,5 +1,5 @@
 from cola import CG, Lanczos, PowerIteration
-from experiments.experiment_fns import log_from_jax
+from experiments.experiment_fns import log_spectrum_results
 from functools import partial
 import gdown
 import utils
@@ -102,7 +102,8 @@ def score_fn(x, _):
 
 i = 0
 target_snr = 0.16
-n_steps = 2000
+# n_steps = 2000
+n_steps = 100
 
 key = jr.PRNGKey(101)
 x_pi = jr.normal(key, (32, 32, 3))
@@ -131,9 +132,8 @@ def get_matrices(x, t, key):
     eps = 1e-2 * cola.eigmax(H, alg=PowerIteration(max_iter=5))
 
     reg_H = cola.PSD(H + eps * cola.ops.I_like(H))
-    # log_spectrum_results(H, alg, results, output_path)
-    # log_from_jax(H, results, output_path)
-    log_from_jax(reg_H, results, output_path)
+    log_spectrum_results(H, Lanczos(max_iters=20, tol=1e-3), results, output_path)
+    # log_from_jax(reg_H, results, output_path)
     inv_H = cola.linalg.inv(reg_H, alg=CG(max_iters=10, P=P))
     isqrt_H = cola.linalg.isqrt(reg_H, alg=Lanczos(max_iters=10))
     return inv_H, isqrt_H
