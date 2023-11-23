@@ -30,9 +30,9 @@ def get_default_configs():
   config.eval = evaluate = ml_collections.ConfigDict()
   evaluate.begin_ckpt = 9
   evaluate.end_ckpt = 26
-  evaluate.batch_size = 1
-  evaluate.enable_sampling = True
-  evaluate.num_samples = 50000
+  evaluate.batch_size = 1 # TODO: it was 1024; yilun changed it to 1
+  evaluate.enable_sampling = True # TODO: it was False; yilun changed it to true
+  evaluate.num_samples = 2000 # TODO: it was 50000; yilun changed it to 2000
   evaluate.enable_loss = True
   evaluate.enable_bpd = False
   evaluate.bpd_dataset = 'test'

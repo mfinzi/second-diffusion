@@ -27,6 +27,11 @@ from scipy import integrate
 import sde_lib
 from models import utils as mutils
 
+from functools import partial
+import cola
+import time
+import pickle
+
 _CORRECTORS = {}
 _PREDICTORS = {}
 
@@ -230,7 +235,41 @@ class AncestralSamplingPredictor(Predictor):
     x_mean = (x + beta[:, None, None, None] * score) / torch.sqrt(1. - beta)[:, None, None, None]
     noise = torch.randn_like(x)
     x = x_mean + torch.sqrt(beta)[:, None, None, None] * noise
+
+    # breakpoint()
+
+    if (timestep.item() % 100) == 0:
+      print(f"timestep.item()={timestep.item()} for hessian computation")
+      tic = time.time()
+      H = torch.autograd.functional.jacobian(partial(self.flat_score_fn,t=t), x.reshape(-1)) # it takes 26 seconds to finish this
+      H_eigvals = torch.linalg.eigvals(H) # take 4 seconds to finish this
+      toc = time.time()
+      output_hessian_computation = {"eigvals": np.array(H_eigvals.cpu()), "timestep": timestep.item(), "time": toc - tic, "method": "torch.linalg.eigvals"}
+
+      use_highest = True
+      filepath = f'/scratch/yk2516/repos/diffusion_model/second-diffusion/score_sde_pytorch/work_dir/logs/eigs_{timestep.item()}.pkl'
+      filepath_txt = f'/scratch/yk2516/repos/diffusion_model/second-diffusion/score_sde_pytorch/work_dir/logs/eigs.txt'
+      filepath_time_txt = f'/scratch/yk2516/repos/diffusion_model/second-diffusion/score_sde_pytorch/work_dir/logs/eigs_time.txt'
+
+      protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
+
+      with open(file=filepath, mode='wb') as f:
+          pickle.dump(obj=output_hessian_computation, file=f, protocol=protocol)
+      with open(filepath_txt, 'a') as f_filepath_txt:
+          f_filepath_txt.write(str(output_hessian_computation['eigvals'].tolist()) + '\n')  
+      with open(filepath_time_txt, 'a') as f_filepath_time_txt:
+          f_filepath_time_txt.write(str(output_hessian_computation['time']) + '\n')  
+
+
+
+      # # TODO: work in progress  
+      # H1 = cola.ops.Jacobian(partial(self.flat_score_fn,t=t), x)
+
     return x, x_mean
+
+  def flat_score_fn(self, x, t):
+    x = x.reshape(1, 3, 32, 32)
+    return self.score_fn(x, t).reshape(-1)
 
   def update_fn(self, x, t):
     if isinstance(self.sde, sde_lib.VESDE):
@@ -315,7 +354,6 @@ class AnnealedLangevinDynamics(Corrector):
       step_size = (target_snr * std) ** 2 * 2 * alpha
       x_mean = x + step_size[:, None, None, None] * grad
       x = x_mean + noise * torch.sqrt(step_size * 2)[:, None, None, None]
-
     return x, x_mean
 
 
@@ -405,7 +443,7 @@ def get_pc_sampler(sde, shape, predictor, corrector, inverse_scaler, snr,
         vec_t = torch.ones(shape[0], device=t.device) * t
         x, x_mean = corrector_update_fn(x, vec_t, model=model)
         x, x_mean = predictor_update_fn(x, vec_t, model=model)
-
+        # breakpoint()
       return inverse_scaler(x_mean if denoise else x), sde.N * (n_steps + 1)
 
   return pc_sampler

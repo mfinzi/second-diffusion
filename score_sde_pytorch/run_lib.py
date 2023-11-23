@@ -532,7 +532,7 @@ def run_accelerated_sampling(config,
       state = restore_checkpoint(ckpt_path, state, device=config.device)
   ema.copy_to(score_model.parameters())
 
-  breakpoint()
+  # breakpoint()
   score_fn = mutils.get_score_fn(sde, score_model, train=False, continuous=config.training.continuous)
 
   # TODO: random sample
