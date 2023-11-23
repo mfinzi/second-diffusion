@@ -40,6 +40,7 @@ import torch
 from torch.utils import tensorboard
 from torchvision.utils import make_grid, save_image
 from utils import save_checkpoint, restore_checkpoint
+import matplotlib.pyplot as plt
 
 FLAGS = flags.FLAGS
 
@@ -423,6 +424,9 @@ def run_accelerated_sampling(config,
   # Create directory to eval_folder
   eval_dir = os.path.join(workdir, eval_folder)
   tf.io.gfile.makedirs(eval_dir)
+  
+  log_dir = os.path.join(workdir, "logs")
+  tf.io.gfile.makedirs(log_dir)
 
   # Build data pipeline
   train_ds, eval_ds, _ = datasets.get_dataset(config,
@@ -489,7 +493,7 @@ def run_accelerated_sampling(config,
     sampling_shape = (config.eval.batch_size,
                       config.data.num_channels,
                       config.data.image_size, config.data.image_size)
-    sampling_fn = sampling.get_sampling_fn(config, sde, sampling_shape, inverse_scaler, sampling_eps)
+    sampling_fn = sampling.get_sampling_fn(config, sde, sampling_shape, inverse_scaler, sampling_eps, workdir=workdir)
 
   # Use inceptionV3 for images with resolution higher than 256.
   inceptionv3 = config.data.image_size >= 256
@@ -533,69 +537,7 @@ def run_accelerated_sampling(config,
   ema.copy_to(score_model.parameters())
 
   # breakpoint()
-  score_fn = mutils.get_score_fn(sde, score_model, train=False, continuous=config.training.continuous)
-
-  # TODO: random sample
-  x_pi = torch.randn((32, 32, 3))
-
-  import matplotlib.pyplot as plt
-
-  fig, ax1 = plt.subplots(1, 1, figsize=(6, 6))
-  image1 = ax1.imshow(inverse_scaler(x_pi))
-
-  # display.clear_output(wait=True)
-  image1.set_data(inverse_scaler(x_pi))
-  # display.display(plt.gcf())
-
-  target_snr = 0.16
-  n_steps = 5000
-
-  # for step in range(n_steps):
-  #     # Setup
-  #     # key, t_key = jr.split(key)
-  #     # t = jr.randint(t_key, (paas,), 30, sde.N-10)
-  #     # t = int((2*jax.nn.sigmoid(-6*step/n_steps))*sde.N)
-  #     t = int((2 * torch.sigmoid(-6 * step / n_steps) * sde.N).item())
-
-  #     # t = jnp.ones((paas,), dtype=jnp.int32) * int(((n_steps-step)/n_steps)*sde.N)
-
-  #     x_pi, key = make_step(x_pi, t, key)
-  #     # print(f"Step {step}, t {t[0]/sde.N:.3f}, Loss {loss:.3f}", end="\r")
-  #     print(f"Step {step}, t {t/sde.N:.3f}", end="\r")
-  #     if step % 100 == 0 and step:
-  #         # plt.imshow(inverse_scaler(jax.vmap(siren)(grid).reshape(img_size, img_size, 3)))
-  #         display.clear_output(wait=True)
-  #         image1.set_data(inverse_scaler(x_pi))
-  #         display.display(plt.gcf())
-
-
-  # def make_step(x_pi, t, key):
-  #     # Calculate step size
-  #     alpha = sde.alphas[t]
-  #     std = sde.marginal_prob(x_pi[None,...], jnp.ones(1)*t/(sde.N-1))[1]
-  #     step_size = (target_snr * std) ** 2 * 2 * alpha
-
-  #     # Calculate score
-  #     score = score_fn(x_pi[None,...], jnp.ones(1)*t/(sde.N-1))
-
-  #     # Noise for Langevin
-  #     key, eps_key = jr.split(key)
-  #     noise = jr.normal(eps_key, x_pi.shape)[None,...]
-
-  #     # Langevin update
-  #     x_mean = x_pi + utils.batch_mul(step_size, score)
-  #     x_pi = x_mean + utils.batch_mul(noise, jnp.sqrt(step_size * 2))
-  #     x_pi = x_pi[0]
-
-  #     loss = None
-  #     key = jr.split(key)[0]
-  #     return x_pi, key
-
-
-
-
-
-
+  # score_fn = mutils.get_score_fn(sde, score_model, train=False, continuous=config.training.continuous)
 
   # Generate samples and compute IS/FID/KID when enabled
   if config.eval.enable_sampling:

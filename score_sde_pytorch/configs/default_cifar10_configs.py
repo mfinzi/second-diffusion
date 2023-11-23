@@ -50,7 +50,7 @@ def get_default_configs():
   config.model = model = ml_collections.ConfigDict()
   model.sigma_min = 0.01
   model.sigma_max = 50
-  model.num_scales = 1000
+  model.num_scales = 2000 # TODO: it was 1000; yilun changed it to 2000
   model.beta_min = 0.1
   model.beta_max = 20.
   model.dropout = 0.1

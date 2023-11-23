@@ -82,7 +82,7 @@ def get_corrector(name):
   return _CORRECTORS[name]
 
 
-def get_sampling_fn(config, sde, shape, inverse_scaler, eps):
+def get_sampling_fn(config, sde, shape, inverse_scaler, eps, workdir=None):
   """Create a sampling function.
 
   Args:
@@ -121,7 +121,8 @@ def get_sampling_fn(config, sde, shape, inverse_scaler, eps):
                                  continuous=config.training.continuous,
                                  denoise=config.sampling.noise_removal,
                                  eps=eps,
-                                 device=config.device)
+                                 device=config.device,
+                                 workdir=workdir,)
   else:
     raise ValueError(f"Sampler name {sampler_name} unknown.")
 
@@ -209,11 +210,13 @@ class ReverseDiffusionPredictor(Predictor):
 class AncestralSamplingPredictor(Predictor):
   """The ancestral sampling predictor. Currently only supports VE/VP SDEs."""
 
-  def __init__(self, sde, score_fn, probability_flow=False):
+  def __init__(self, sde, score_fn, probability_flow=False, workdir=None):
     super().__init__(sde, score_fn, probability_flow)
     if not isinstance(sde, sde_lib.VPSDE) and not isinstance(sde, sde_lib.VESDE):
       raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
     assert not probability_flow, "Probability flow not supported by ancestral sampling"
+
+    self.workdir = workdir
 
   def vesde_update_fn(self, x, t):
     sde = self.sde
@@ -236,20 +239,21 @@ class AncestralSamplingPredictor(Predictor):
     noise = torch.randn_like(x)
     x = x_mean + torch.sqrt(beta)[:, None, None, None] * noise
 
-    # breakpoint()
-
+    # Computing Hessian Eigenvalues (Every 100 Iterations)
     if (timestep.item() % 100) == 0:
       print(f"timestep.item()={timestep.item()} for hessian computation")
+      
       tic = time.time()
       H = torch.autograd.functional.jacobian(partial(self.flat_score_fn,t=t), x.reshape(-1)) # it takes 26 seconds to finish this
       H_eigvals = torch.linalg.eigvals(H) # take 4 seconds to finish this
       toc = time.time()
+      
       output_hessian_computation = {"eigvals": np.array(H_eigvals.cpu()), "timestep": timestep.item(), "time": toc - tic, "method": "torch.linalg.eigvals"}
 
       use_highest = True
-      filepath = f'/scratch/yk2516/repos/diffusion_model/second-diffusion/score_sde_pytorch/work_dir/logs/eigs_{timestep.item()}.pkl'
-      filepath_txt = f'/scratch/yk2516/repos/diffusion_model/second-diffusion/score_sde_pytorch/work_dir/logs/eigs.txt'
-      filepath_time_txt = f'/scratch/yk2516/repos/diffusion_model/second-diffusion/score_sde_pytorch/work_dir/logs/eigs_time.txt'
+      filepath = f"{self.workdir}/logs/eigs_sde_N{sde.N}.pkl"
+      filepath_txt = f"{self.workdir}/logs/eigs_sde_N{sde.N}.txt"
+      filepath_time_txt = f'{self.workdir}/logs/eigs_sde_N{sde.N}_time.txt'
 
       protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
 
@@ -258,9 +262,7 @@ class AncestralSamplingPredictor(Predictor):
       with open(filepath_txt, 'a') as f_filepath_txt:
           f_filepath_txt.write(str(output_hessian_computation['eigvals'].tolist()) + '\n')  
       with open(filepath_time_txt, 'a') as f_filepath_time_txt:
-          f_filepath_time_txt.write(str(output_hessian_computation['time']) + '\n')  
-
-
+          f_filepath_time_txt.write(str(output_hessian_computation['time']) + '\n')
 
       # # TODO: work in progress  
       # H1 = cola.ops.Jacobian(partial(self.flat_score_fn,t=t), x)
@@ -368,18 +370,18 @@ class NoneCorrector(Corrector):
     return x, x
 
 
-def shared_predictor_update_fn(x, t, sde, model, predictor, probability_flow, continuous):
+def shared_predictor_update_fn(x, t, sde, model, predictor, probability_flow, continuous, workdir=None):
   """A wrapper that configures and returns the update function of predictors."""
   score_fn = mutils.get_score_fn(sde, model, train=False, continuous=continuous)
   if predictor is None:
     # Corrector-only sampler
     predictor_obj = NonePredictor(sde, score_fn, probability_flow)
   else:
-    predictor_obj = predictor(sde, score_fn, probability_flow)
+    predictor_obj = predictor(sde, score_fn, probability_flow, workdir=workdir)
   return predictor_obj.update_fn(x, t)
 
 
-def shared_corrector_update_fn(x, t, sde, model, corrector, continuous, snr, n_steps):
+def shared_corrector_update_fn(x, t, sde, model, corrector, continuous, snr, n_steps, workdir=None):
   """A wrapper tha configures and returns the update function of correctors."""
   score_fn = mutils.get_score_fn(sde, model, train=False, continuous=continuous)
   if corrector is None:
@@ -392,7 +394,7 @@ def shared_corrector_update_fn(x, t, sde, model, corrector, continuous, snr, n_s
 
 def get_pc_sampler(sde, shape, predictor, corrector, inverse_scaler, snr,
                    n_steps=1, probability_flow=False, continuous=False,
-                   denoise=True, eps=1e-3, device='cuda'):
+                   denoise=True, eps=1e-3, device='cuda', workdir=None):
   """Create a Predictor-Corrector (PC) sampler.
 
   Args:
@@ -417,13 +419,15 @@ def get_pc_sampler(sde, shape, predictor, corrector, inverse_scaler, snr,
                                           sde=sde,
                                           predictor=predictor,
                                           probability_flow=probability_flow,
-                                          continuous=continuous)
+                                          continuous=continuous,
+                                          workdir=workdir)
   corrector_update_fn = functools.partial(shared_corrector_update_fn,
                                           sde=sde,
                                           corrector=corrector,
                                           continuous=continuous,
                                           snr=snr,
-                                          n_steps=n_steps)
+                                          n_steps=n_steps,
+                                          workdir=workdir)
 
   def pc_sampler(model):
     """ The PC sampler funciton.

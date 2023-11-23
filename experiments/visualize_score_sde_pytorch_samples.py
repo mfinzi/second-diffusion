@@ -7,49 +7,78 @@ import ast
 
 sample_storage_path = '/scratch/yk2516/repos/diffusion_model/second-diffusion/score_sde_pytorch/work_dir/eval/ckpt_26'
 
-for i in range(100):
+for i in range(10):
     samples_i = np.load(os.path.join(sample_storage_path, f'samples_{i}.npz'))
 
     # save to png
     image_samples_i = Image.fromarray(samples_i['samples'].astype('uint8').squeeze())
     image_samples_i.save(os.path.join(sample_storage_path, f'samples_{i}.png'))
 
+    # pickle
     # with open('/scratch/yk2516/repos/diffusion_model/second-diffusion/score_sde_pytorch/work_dir/logs/eigs.pkl', 'rb') as file:
     #     loaded_data = pickle.load(file)
     # print(loaded_data)
     # print(f"len(loaded_data)={len(loaded_data)}")
 
-    file_path = '/scratch/yk2516/repos/diffusion_model/second-diffusion/score_sde_pytorch/work_dir/logs/eigs.pkl'
+    # txt
+    file_path = '/scratch/yk2516/repos/diffusion_model/second-diffusion/score_sde_pytorch/work_dir/logs/eigs.txt'
 
-    # Open the file in read mode
     with open(file_path, 'r') as file:
-        # Read all lines into a list
         lines = file.readlines()
 
-    # Process the lines and convert string representations of lists to actual lists
-    for line in lines:
-        # Use ast.literal_eval to safely convert the string to a list
-        actual_list = ast.literal_eval(line.strip())
-        
-        # Now you can work with the actual list
-        print(actual_list)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
 
-    breakpoint()
-    plt.figure()
-    # for j in range(len(loaded_data)):
-    #     plt.plot(loaded_data[j]['eigvals'], label=f'iter_{j}')
-    plt.plot(loaded_data['eigvals'], label=f'iter')
-    plt.legend()
-    plt.show()
-    plt.xlabel("eigenvalue indices")
-    plt.ylabel("eigenvalues")
-    plt.title("Eigen-Spectrum of ∇^2 log p(x)")
+    # plt.figure()
+    for j, line in enumerate(lines[i*10:(i+1)*10]):
+        actual_eigvals = ast.literal_eval(line.strip())
+        sorted_actual_eigvals = sorted(actual_eigvals, key=lambda x: x.real)
+        # plt.plot(sorted_actual_eigvals, label=f'iter_{(j+1)*100}')
+        ax1.plot(sorted_actual_eigvals, label=f'iter_{(j+1)*100}')
 
-    breakpoint()
+
+    ax1.legend()
+    ax1.set_xlabel("eigenvalue indices (3*32*32=3072 in total)")
+    ax1.set_ylabel("eigenvalues")
+    ax1.set_title(f"Eigen-Spectrum of ∇^2_x log p(x) for samples {i}")
+
+    # Display the image on the second subplot
+    ax2.imshow(image_samples_i)
+    ax2.axis('off')  # Turn off axis labels
+    ax2.set_title(f'Samples {i}')
+    
+    plt.tight_layout()
+
+    # Save the figure
     plt.savefig(os.path.join(sample_storage_path, f'hessian_eigvals_plot_samples_{i}.png'))
 
+    # Show the plots
+    plt.show()
 
-    break
+    # plt.legend()
+    # plt.show()
+    # plt.xlabel("eigenvalue indices")
+    # plt.ylabel("eigenvalues")
+    # plt.title(f"Eigen-Spectrum of ∇^2 log p(x) for samples {i}")
+
+
+    # plt.savefig(os.path.join(sample_storage_path, f'hessian_eigvals_plot_samples_{i}.png'))
+
+    # breakpoint()
+    # plt.figure()
+    # for j in range(len(loaded_data)):
+    #     plt.plot(loaded_data[j]['eigvals'], label=f'iter_{j}')
+    # plt.plot(loaded_data['eigvals'], label=f'iter')
+    # plt.legend()
+    # plt.show()
+    # plt.xlabel("eigenvalue indices")
+    # plt.ylabel("eigenvalues")
+    # plt.title("Eigen-Spectrum of ∇^2 log p(x)")
+
+    # breakpoint()
+    # plt.savefig(os.path.join(sample_storage_path, f'hessian_eigvals_plot_samples_{i}.png'))
+
+
+    
 
 
 
