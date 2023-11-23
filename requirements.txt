@@ -14,4 +14,5 @@ einops
 flax==0.6.0
 equinox
 diffrax
-git+https://github.com/wilson-labs/cola
+jupyter
+pre-commit

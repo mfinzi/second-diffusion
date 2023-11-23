@@ -12,7 +12,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """All functions related to loss computation and optimization.
 """
 
@@ -34,16 +33,13 @@ def get_optimizer(config):
             weight_decay=config.optim.weight_decay,
         )
     else:
-        raise NotImplementedError(
-            f"Optimizer {config.optim.optimizer} not supported yet!"
-        )
+        raise NotImplementedError(f"Optimizer {config.optim.optimizer} not supported yet!")
 
     return optimizer
 
 
 def optimization_manager(config):
     """Returns an optimize_fn based on `config`."""
-
     def optimize_fn(
         state,
         grad,
@@ -56,9 +52,7 @@ def optimization_manager(config):
             lr = lr * jnp.minimum(state.step / warmup, 1.0)
         if grad_clip >= 0:
             # Compute global gradient norm
-            grad_norm = jnp.sqrt(
-                sum([jnp.sum(jnp.square(x)) for x in jax.tree_leaves(grad)])
-            )
+            grad_norm = jnp.sqrt(sum([jnp.sum(jnp.square(x)) for x in jax.tree_leaves(grad)]))
             # Clip gradient
             clipped_grad = jax.tree_map(
                 lambda x: x * grad_clip / jnp.maximum(grad_norm, grad_clip),
@@ -96,11 +90,7 @@ def get_sde_loss_fn(
     Returns:
       A loss function.
     """
-    reduce_op = (
-        jnp.mean
-        if reduce_mean
-        else lambda *args, **kwargs: 0.5 * jnp.sum(*args, **kwargs)
-    )
+    reduce_op = (jnp.mean if reduce_mean else lambda *args, **kwargs: 0.5 * jnp.sum(*args, **kwargs))
 
     def loss_fn(rng, params, states, batch):
         """Compute the loss function.
@@ -128,9 +118,7 @@ def get_sde_loss_fn(
         data = batch["image"]
 
         rng, step_rng = random.split(rng)
-        t = random.uniform(
-            step_rng, (data.shape[0],), minval=eps, maxval=sde.T
-        )
+        t = random.uniform(step_rng, (data.shape[0], ), minval=eps, maxval=sde.T)
         rng, step_rng = random.split(rng)
         z = random.normal(step_rng, data.shape)
         mean, std = sde.marginal_prob(data, t)
@@ -142,11 +130,9 @@ def get_sde_loss_fn(
             losses = jnp.square(batch_mul(score, std) + z)
             losses = reduce_op(losses.reshape((losses.shape[0], -1)), axis=-1)
         else:
-            g2 = sde.sde(jnp.zeros_like(data), t)[1] ** 2
+            g2 = sde.sde(jnp.zeros_like(data), t)[1]**2
             losses = jnp.square(score + batch_mul(z, 1.0 / std))
-            losses = (
-                reduce_op(losses.reshape((losses.shape[0], -1)), axis=-1) * g2
-            )
+            losses = (reduce_op(losses.reshape((losses.shape[0], -1)), axis=-1) * g2)
 
         loss = jnp.mean(losses)
         return loss, new_model_state
@@ -160,17 +146,13 @@ def get_smld_loss_fn(vesde, model, train, reduce_mean=False):
 
     # Previous SMLD models assume descending sigmas
     smld_sigma_array = vesde.discrete_sigmas[::-1]
-    reduce_op = (
-        jnp.mean
-        if reduce_mean
-        else lambda *args, **kwargs: 0.5 * jnp.sum(*args, **kwargs)
-    )
+    reduce_op = (jnp.mean if reduce_mean else lambda *args, **kwargs: 0.5 * jnp.sum(*args, **kwargs))
 
     def loss_fn(rng, params, states, batch):
         model_fn = mutils.get_model_fn(model, params, states, train=train)
         data = batch["image"]
         rng, step_rng = random.split(rng)
-        labels = random.choice(step_rng, vesde.N, shape=(data.shape[0],))
+        labels = random.choice(step_rng, vesde.N, shape=(data.shape[0], ))
         sigmas = smld_sigma_array[labels]
         rng, step_rng = random.split(rng)
         noise = batch_mul(random.normal(step_rng, data.shape), sigmas)
@@ -179,10 +161,7 @@ def get_smld_loss_fn(vesde, model, train, reduce_mean=False):
         score, new_model_state = model_fn(perturbed_data, labels, rng=step_rng)
         target = -batch_mul(noise, 1.0 / (sigmas**2))
         losses = jnp.square(score - target)
-        losses = (
-            reduce_op(losses.reshape((losses.shape[0], -1)), axis=-1)
-            * sigmas**2
-        )
+        losses = (reduce_op(losses.reshape((losses.shape[0], -1)), axis=-1) * sigmas**2)
         loss = jnp.mean(losses)
         return loss, new_model_state
 
@@ -193,24 +172,18 @@ def get_ddpm_loss_fn(vpsde, model, train, reduce_mean=True):
     """Legacy code to reproduce previous results on DDPM. Not recommended for new work."""
     assert isinstance(vpsde, VPSDE), "DDPM training only works for VPSDEs."
 
-    reduce_op = (
-        jnp.mean
-        if reduce_mean
-        else lambda *args, **kwargs: 0.5 * jnp.sum(*args, **kwargs)
-    )
+    reduce_op = (jnp.mean if reduce_mean else lambda *args, **kwargs: 0.5 * jnp.sum(*args, **kwargs))
 
     def loss_fn(rng, params, states, batch):
         model_fn = mutils.get_model_fn(model, params, states, train=train)
         data = batch["image"]
         rng, step_rng = random.split(rng)
-        labels = random.choice(step_rng, vpsde.N, shape=(data.shape[0],))
+        labels = random.choice(step_rng, vpsde.N, shape=(data.shape[0], ))
         sqrt_alphas_cumprod = vpsde.sqrt_alphas_cumprod
         sqrt_1m_alphas_cumprod = vpsde.sqrt_1m_alphas_cumprod
         rng, step_rng = random.split(rng)
         noise = random.normal(step_rng, data.shape)
-        perturbed_data = batch_mul(
-            sqrt_alphas_cumprod[labels], data
-        ) + batch_mul(sqrt_1m_alphas_cumprod[labels], noise)
+        perturbed_data = batch_mul(sqrt_alphas_cumprod[labels], data) + batch_mul(sqrt_1m_alphas_cumprod[labels], noise)
         rng, step_rng = random.split(rng)
         score, new_model_state = model_fn(perturbed_data, labels, rng=step_rng)
         losses = jnp.square(score - noise)
@@ -255,21 +228,13 @@ def get_step_fn(
             likelihood_weighting=likelihood_weighting,
         )
     else:
-        assert (
-            not likelihood_weighting
-        ), "Likelihood weighting is not supported for original SMLD/DDPM training."
+        assert (not likelihood_weighting), "Likelihood weighting is not supported for original SMLD/DDPM training."
         if isinstance(sde, VESDE):
-            loss_fn = get_smld_loss_fn(
-                sde, model, train, reduce_mean=reduce_mean
-            )
+            loss_fn = get_smld_loss_fn(sde, model, train, reduce_mean=reduce_mean)
         elif isinstance(sde, VPSDE):
-            loss_fn = get_ddpm_loss_fn(
-                sde, model, train, reduce_mean=reduce_mean
-            )
+            loss_fn = get_ddpm_loss_fn(sde, model, train, reduce_mean=reduce_mean)
         else:
-            raise ValueError(
-                f"Discrete training for {sde.__class__.__name__} is not recommended."
-            )
+            raise ValueError(f"Discrete training for {sde.__class__.__name__} is not recommended.")
 
     def step_fn(carry_state, batch):
         """Running one step of training or evaluation.
@@ -292,14 +257,11 @@ def get_step_fn(
         if train:
             params = state.optimizer.target
             states = state.model_state
-            (loss, new_model_state), grad = grad_fn(
-                step_rng, params, states, batch
-            )
+            (loss, new_model_state), grad = grad_fn(step_rng, params, states, batch)
             grad = jax.lax.pmean(grad, axis_name="batch")
             new_optimizer = optimize_fn(state, grad)
             new_params_ema = jax.tree_multimap(
-                lambda p_ema, p: p_ema * state.ema_rate
-                + p * (1.0 - state.ema_rate),
+                lambda p_ema, p: p_ema * state.ema_rate + p * (1.0 - state.ema_rate),
                 state.params_ema,
                 new_optimizer.target,
             )
@@ -311,9 +273,7 @@ def get_step_fn(
                 params_ema=new_params_ema,
             )
         else:
-            loss, _ = loss_fn(
-                step_rng, state.params_ema, state.model_state, batch
-            )
+            loss, _ = loss_fn(step_rng, state.params_ema, state.model_state, batch)
             new_state = state
 
         loss = jax.lax.pmean(loss, axis_name="batch")

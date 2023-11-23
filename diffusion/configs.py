@@ -28,9 +28,9 @@ def get_default_configs():
     training.snapshot_freq = 50000
     training.log_freq = 50
     training.eval_freq = 100
-    ## store additional checkpoints for preemption in cloud computing environments
+    # store additional checkpoints for preemption in cloud computing environments
     training.snapshot_freq_for_preemption = 10000
-    ## produce samples at each snapshot.
+    # produce samples at each snapshot.
     training.snapshot_sampling = True
     training.likelihood_weighting = False
     training.continuous = True
@@ -118,7 +118,7 @@ def get_config():
     model.nf = 128
     model.ch_mult = (1, 2, 2, 2)
     model.num_res_blocks = 2
-    model.attn_resolutions = (16,)
+    model.attn_resolutions = (16, )
     model.resamp_with_conv = True
     model.conditional = True
 

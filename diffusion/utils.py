@@ -66,16 +66,9 @@ def save_image(ndarray, fp, nrow=8, padding=2, pad_value=0.0, format=None):
         filename extension. If a file object was used instead of a filename, this
         parameter should always be used.
     """
-    if not (
-        isinstance(ndarray, jnp.ndarray)
-        or (
-            isinstance(ndarray, list)
-            and all(isinstance(t, jnp.ndarray) for t in ndarray)
-        )
-    ):
-        raise TypeError(
-            "array_like of tensors expected, got {}".format(type(ndarray))
-        )
+    if not (isinstance(ndarray, jnp.ndarray) or
+            (isinstance(ndarray, list) and all(isinstance(t, jnp.ndarray) for t in ndarray))):
+        raise TypeError("array_like of tensors expected, got {}".format(type(ndarray)))
 
     ndarray = jnp.asarray(ndarray)
 
@@ -86,9 +79,7 @@ def save_image(ndarray, fp, nrow=8, padding=2, pad_value=0.0, format=None):
     nmaps = ndarray.shape[0]
     xmaps = min(nrow, nmaps)
     ymaps = int(math.ceil(float(nmaps) / xmaps))
-    height, width = int(ndarray.shape[1] + padding), int(
-        ndarray.shape[2] + padding
-    )
+    height, width = int(ndarray.shape[1] + padding), int(ndarray.shape[2] + padding)
     num_channels = ndarray.shape[3]
     grid = jnp.full(
         (height * ymaps + padding, width * xmaps + padding, num_channels),
@@ -102,8 +93,8 @@ def save_image(ndarray, fp, nrow=8, padding=2, pad_value=0.0, format=None):
             grid = jax.ops.index_update(
                 grid,
                 jax.ops.index[
-                    y * height + padding: (y + 1) * height,
-                    x * width + padding: (x + 1) * width,
+                    y * height + padding:(y + 1) * height,
+                    x * width + padding:(x + 1) * width,
                 ],
                 ndarray[k],
             )

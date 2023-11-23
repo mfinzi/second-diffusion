@@ -42,16 +42,15 @@ def get_act(config):
         raise NotImplementedError("activation function does not exist!")
 
 
-def ncsn_conv1x1(
-    x, out_planes, stride=1, bias=True, dilation=1, init_scale=1.0
-):
+def ncsn_conv1x1(x, out_planes, stride=1, bias=True, dilation=1, init_scale=1.0):
     """1x1 convolution with PyTorch initialization. Same as NCSNv1/v2."""
     init_scale = 1e-10 if init_scale == 0 else init_scale
-    kernel_init = jnn.initializers.variance_scaling(
-        1 / 3 * init_scale, "fan_in", "uniform"
-    )
+    kernel_init = jnn.initializers.variance_scaling(1 / 3 * init_scale, "fan_in", "uniform")
     kernel_shape = (1, 1) + (x.shape[-1], out_planes)
-    bias_init = lambda key, shape: kernel_init(key, kernel_shape)[0, 0, 0, :]
+
+    def bias_init(key, shape):
+        return kernel_init(key, kernel_shape)[0, 0, 0, :]
+
     output = nn.Conv(
         out_planes,
         kernel_size=(1, 1),
@@ -71,9 +70,7 @@ def default_init(scale=1.0):
     return jnn.initializers.variance_scaling(scale, "fan_avg", "uniform")
 
 
-def ddpm_conv1x1(
-    x, out_planes, stride=1, bias=True, dilation=1, init_scale=1.0
-):
+def ddpm_conv1x1(x, out_planes, stride=1, bias=True, dilation=1, init_scale=1.0):
     """1x1 convolution with DDPM initialization."""
     bias_init = jnn.initializers.zeros
     output = nn.Conv(
@@ -89,16 +86,15 @@ def ddpm_conv1x1(
     return output
 
 
-def ncsn_conv3x3(
-    x, out_planes, stride=1, bias=True, dilation=1, init_scale=1.0
-):
+def ncsn_conv3x3(x, out_planes, stride=1, bias=True, dilation=1, init_scale=1.0):
     """3x3 convolution with PyTorch initialization. Same as NCSNv1/NCSNv2."""
     init_scale = 1e-10 if init_scale == 0 else init_scale
-    kernel_init = jnn.initializers.variance_scaling(
-        1 / 3 * init_scale, "fan_in", "uniform"
-    )
+    kernel_init = jnn.initializers.variance_scaling(1 / 3 * init_scale, "fan_in", "uniform")
     kernel_shape = (3, 3) + (x.shape[-1], out_planes)
-    bias_init = lambda key, shape: kernel_init(key, kernel_shape)[0, 0, 0, :]
+
+    def bias_init(key, shape):
+        return kernel_init(key, kernel_shape)[0, 0, 0, :]
+
     output = nn.Conv(
         out_planes,
         kernel_size=(3, 3),
@@ -112,9 +108,7 @@ def ncsn_conv3x3(
     return output
 
 
-def ddpm_conv3x3(
-    x, out_planes, stride=1, bias=True, dilation=1, init_scale=1.0
-):
+def ddpm_conv3x3(x, out_planes, stride=1, bias=True, dilation=1, init_scale=1.0):
     """3x3 convolution with DDPM initialization."""
     bias_init = jnn.initializers.zeros
     output = nn.Conv(
@@ -149,9 +143,7 @@ class CRPBlock(nn.Module):
         x = self.act(x)
         path = x
         for _ in range(self.n_stages):
-            path = nn.max_pool(
-                path, window_shape=(5, 5), strides=(1, 1), padding="SAME"
-            )
+            path = nn.max_pool(path, window_shape=(5, 5), strides=(1, 1), padding="SAME")
             path = ncsn_conv3x3(path, self.features, stride=1, bias=False)
             x = path + x
         return x
@@ -171,9 +163,7 @@ class CondCRPBlock(nn.Module):
         path = x
         for _ in range(self.n_stages):
             path = self.normalizer()(path, y)
-            path = nn.avg_pool(
-                path, window_shape=(5, 5), strides=(1, 1), padding="SAME"
-            )
+            path = nn.avg_pool(path, window_shape=(5, 5), strides=(1, 1), padding="SAME")
             path = ncsn_conv3x3(path, self.features, stride=1, bias=False)
             x = path + x
         return x
@@ -233,17 +223,11 @@ class MSFBlock(nn.Module):
         for i in range(len(xs)):
             h = ncsn_conv3x3(xs[i], self.features, stride=1, bias=True)
             if self.interpolation == "bilinear":
-                h = jax.image.resize(
-                    h, (h.shape[0], *self.shape, h.shape[-1]), "bilinear"
-                )
+                h = jax.image.resize(h, (h.shape[0], *self.shape, h.shape[-1]), "bilinear")
             elif self.interpolation == "nearest_neighbor":
-                h = jax.image.resize(
-                    h, (h.shape[0], *self.shape, h.shape[-1]), "nearest"
-                )
+                h = jax.image.resize(h, (h.shape[0], *self.shape, h.shape[-1]), "nearest")
             else:
-                raise ValueError(
-                    f"Interpolation {self.interpolation} does not exist!"
-                )
+                raise ValueError(f"Interpolation {self.interpolation} does not exist!")
             sums = sums + h
         return sums
 
@@ -263,17 +247,11 @@ class CondMSFBlock(nn.Module):
             h = self.normalizer()(xs[i], y)
             h = ncsn_conv3x3(h, self.features, stride=1, bias=True)
             if self.interpolation == "bilinear":
-                h = jax.image.resize(
-                    h, (h.shape[0], *self.shape, h.shape[-1]), "bilinear"
-                )
+                h = jax.image.resize(h, (h.shape[0], *self.shape, h.shape[-1]), "bilinear")
             elif self.interpolation == "nearest_neighbor":
-                h = jax.image.resize(
-                    h, (h.shape[0], *self.shape, h.shape[-1]), "nearest"
-                )
+                h = jax.image.resize(h, (h.shape[0], *self.shape, h.shape[-1]), "nearest")
             else:
-                raise ValueError(
-                    f"Interpolation {self.interpolation} does not exist"
-                )
+                raise ValueError(f"Interpolation {self.interpolation} does not exist")
             sums = sums + h
         return sums
 
@@ -290,9 +268,7 @@ class RefineBlock(nn.Module):
 
     @nn.compact
     def __call__(self, xs):
-        rcu_block = functools.partial(
-            RCUBlock, n_blocks=2, n_stages=2, act=self.act
-        )
+        rcu_block = functools.partial(RCUBlock, n_blocks=2, n_stages=2, act=self.act)
         rcu_block_output = functools.partial(
             RCUBlock,
             features=self.features,
@@ -315,9 +291,7 @@ class RefineBlock(nn.Module):
         else:
             h = hs[0]
 
-        crp = functools.partial(
-            CRPBlock, features=self.features, n_stages=2, act=self.act
-        )
+        crp = functools.partial(CRPBlock, features=self.features, n_stages=2, act=self.act)
         h = crp()(h)
         h = rcu_block_output()(h)
         return h
@@ -395,17 +369,12 @@ class ConvMeanPool(nn.Module):
             padding="SAME",
             use_bias=self.biases,
         )(inputs)
-        output = (
-            sum(
-                [
-                    output[:, ::2, ::2, :],
-                    output[:, 1::2, ::2, :],
-                    output[:, ::2, 1::2, :],
-                    output[:, 1::2, 1::2, :],
-                ]
-            )
-            / 4.0
-        )
+        output = (sum([
+            output[:, ::2, ::2, :],
+            output[:, 1::2, ::2, :],
+            output[:, ::2, 1::2, :],
+            output[:, 1::2, 1::2, :],
+        ]) / 4.0)
         return output
 
 
@@ -419,17 +388,12 @@ class MeanPoolConv(nn.Module):
     @nn.compact
     def __call__(self, inputs):
         output = inputs
-        output = (
-            sum(
-                [
-                    output[:, ::2, ::2, :],
-                    output[:, 1::2, ::2, :],
-                    output[:, ::2, 1::2, :],
-                    output[:, 1::2, 1::2, :],
-                ]
-            )
-            / 4.0
-        )
+        output = (sum([
+            output[:, ::2, ::2, :],
+            output[:, 1::2, ::2, :],
+            output[:, ::2, 1::2, :],
+            output[:, 1::2, 1::2, :],
+        ]) / 4.0)
         output = nn.Conv(
             features=self.output_dim,
             kernel_size=(self.kernel_size, self.kernel_size),
@@ -459,22 +423,16 @@ class ResidualBlock(nn.Module):
             h = self.act(h)
             if self.dilation > 1:
                 h = ncsn_conv3x3(h, self.output_dim, dilation=self.dilation)
-                shortcut = ncsn_conv3x3(
-                    x, self.output_dim, dilation=self.dilation
-                )
+                shortcut = ncsn_conv3x3(x, self.output_dim, dilation=self.dilation)
             else:
                 h = ConvMeanPool(output_dim=self.output_dim)(h)
-                shortcut = ConvMeanPool(
-                    output_dim=self.output_dim, kernel_size=1
-                )(x)
+                shortcut = ConvMeanPool(output_dim=self.output_dim, kernel_size=1)(x)
         elif self.resample is None:
             if self.dilation > 1:
                 if self.output_dim == x.shape[-1]:
                     shortcut = x
                 else:
-                    shortcut = ncsn_conv3x3(
-                        x, self.output_dim, dilation=self.dilation
-                    )
+                    shortcut = ncsn_conv3x3(x, self.output_dim, dilation=self.dilation)
                 h = ncsn_conv3x3(h, self.output_dim, dilation=self.dilation)
                 h = self.normalization()(h)
                 h = self.act(h)
@@ -511,22 +469,16 @@ class ConditionalResidualBlock(nn.Module):
             h = self.act(h)
             if self.dilation > 1:
                 h = ncsn_conv3x3(h, self.output_dim, dilation=self.dilation)
-                shortcut = ncsn_conv3x3(
-                    x, self.output_dim, dilation=self.dilation
-                )
+                shortcut = ncsn_conv3x3(x, self.output_dim, dilation=self.dilation)
             else:
                 h = ConvMeanPool(output_dim=self.output_dim)(h)
-                shortcut = ConvMeanPool(
-                    output_dim=self.output_dim, kernel_size=1
-                )(x)
+                shortcut = ConvMeanPool(output_dim=self.output_dim, kernel_size=1)(x)
         elif self.resample is None:
             if self.dilation > 1:
                 if self.output_dim == x.shape[-1]:
                     shortcut = x
                 else:
-                    shortcut = ncsn_conv3x3(
-                        x, self.output_dim, dilation=self.dilation
-                    )
+                    shortcut = ncsn_conv3x3(x, self.output_dim, dilation=self.dilation)
                 h = ncsn_conv3x3(h, self.output_dim, dilation=self.dilation)
                 h = self.normalization()(h, y)
                 h = self.act(h)
@@ -574,12 +526,10 @@ class NIN(nn.Module):
     @nn.compact
     def __call__(self, x):
         in_dim = int(x.shape[-1])
-        W = self.param(
-            "W", default_init(scale=self.init_scale), (in_dim, self.num_units)
-        )
-        b = self.param("b", jnn.initializers.zeros, (self.num_units,))
+        W = self.param("W", default_init(scale=self.init_scale), (in_dim, self.num_units))
+        b = self.param("b", jnn.initializers.zeros, (self.num_units, ))
         y = contract_inner(x, W) + b
-        assert y.shape == x.shape[:-1] + (self.num_units,)
+        assert y.shape == x.shape[:-1] + (self.num_units, )
         return y
 
 
@@ -590,8 +540,8 @@ def _einsum(a, b, c, x, y):
 
 def contract_inner(x, y):
     """tensordot(x, y, 1)."""
-    x_chars = list(string.ascii_lowercase[: len(x.shape)])
-    y_chars = list(string.ascii_uppercase[: len(y.shape)])
+    x_chars = list(string.ascii_lowercase[:len(x.shape)])
+    y_chars = list(string.ascii_uppercase[:len(y.shape)])
     assert len(x_chars) == len(x.shape) and len(y_chars) == len(y.shape)
     y_chars[0] = x_chars[-1]  # first axis of y and last of x get summed
     out_chars = x_chars[:-1] + y_chars[1:]
@@ -611,7 +561,7 @@ class AttnBlock(nn.Module):
         k = NIN(C)(h)
         v = NIN(C)(h)
 
-        w = jnp.einsum("bhwc,bHWc->bhwHW", q, k) * (int(C) ** (-0.5))
+        w = jnp.einsum("bhwc,bHWc->bhwHW", q, k) * (int(C)**(-0.5))
         w = jnp.reshape(w, (B, H, W, H * W))
         w = jax.nn.softmax(w, axis=-1)
         w = jnp.reshape(w, (B, H, W, H, W))
@@ -641,9 +591,7 @@ class Downsample(nn.Module):
         if self.with_conv:
             x = ddpm_conv3x3(x, C, stride=2)
         else:
-            x = nn.avg_pool(
-                x, window_shape=(2, 2), strides=(2, 2), padding="SAME"
-            )
+            x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2), padding="SAME")
         assert x.shape == (B, H // 2, W // 2, C)
         return x
 
@@ -665,9 +613,7 @@ class ResnetBlockDDPM(nn.Module):
         h = ddpm_conv3x3(h, out_ch)
         # Add bias to each feature map conditioned on the time embedding
         if temb is not None:
-            h += nn.Dense(out_ch, kernel_init=default_init())(self.act(temb))[
-                :, None, None, :
-            ]
+            h += nn.Dense(out_ch, kernel_init=default_init())(self.act(temb))[:, None, None, :]
         h = self.act(self.normalize()(h))
         h = nn.Dropout(self.dropout)(h, deterministic=not train)
         h = ddpm_conv3x3(h, out_ch, init_scale=0.0)

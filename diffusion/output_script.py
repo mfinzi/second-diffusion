@@ -1,8 +1,5 @@
 from cola import Auto, CG, Lanczos, PowerIteration
 from functools import partial
-from cola.linalg.decompositions.lanczos import lanczos_eigs
-import pickle
-import time
 import gdown
 import utils
 import datasets
@@ -10,6 +7,7 @@ from sampling import EulerMaruyamaPredictor, LangevinCorrector, get_pc_sampler
 import mutils
 from sde_lib import VPSDE
 from configs import get_config
+from IPython import display
 import cola
 import flax
 import diffrax as dfx
@@ -33,8 +31,6 @@ import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # see issue #152
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
-# from IPython.core.debugger import Pdb
-
 TESTING = True
 RETRAIN_MODEL = True
 SEED = 42
@@ -47,39 +43,8 @@ key = jr.PRNGKey(SEED)
 # import torchvision as tv
 
 # from IPython.display import display, clear_output
-# from IPython import display
 # torch.manual_seed(3)
 # dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-
-spectrum_results = []
-output_path = './logs/dense_v2.pkl'
-
-
-def log_spectrum_results(A, alg, results, output_path):
-    out = get_spectrum_results(A, alg=alg)
-    results.append(out)
-    save_object(results, output_path)
-
-
-def get_spectrum_results(A, alg):
-    tic = time.time()
-    if isinstance(alg, cola.Lanczos):
-        # TODO: AP to fix this
-        raise ValueError("shouldn't use Lanczos")
-        eigvals, *_ = lanczos_eigs(A, **alg.__dict__)
-        method_name = "lanczos"
-    else:
-        eigvals, _ = cola.eig(A, k=A.shape[0], alg=alg)
-        method_name = "cholesky"
-    toc = time.time()
-    return {"eigvals": eigvals, "time": toc - tic, "method": method_name}
-
-
-def save_object(obj, filepath, use_highest=True):
-    protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
-    with open(file=filepath, mode='wb') as f:
-        pickle.dump(obj=obj, file=f, protocol=protocol)
-
 
 if not os.path.exists('checkpoint_26'):
     # Replace 'FILE_ID' with the actual file ID
@@ -175,6 +140,8 @@ i = 0
 #     x, x_mean, rng = back_step(x, vec_t, dt, rng)
 #     print(f"{i} / {sde.N}", end="\r")
 
+# plt.imshow(ein.rearrange(inverse_scaler(x_mean), '(b1 b2) h w c -> (b1 h) (b2 w) c', b1=8))
+
 
 @jax.jit
 def annealed_langevin(x, t, dt, rng):
@@ -231,9 +198,25 @@ x_pi = jr.normal(key, (32, 32, 3))
 fig, ax1 = plt.subplots(1, 1, figsize=(6, 6))
 image1 = ax1.imshow(inverse_scaler(x_pi))
 
-# display.clear_output(wait=True)
-# image1.set_data(inverse_scaler(x_pi))
-# display.display(plt.gcf())
+display.clear_output(wait=True)
+image1.set_data(inverse_scaler(x_pi))
+display.display(plt.gcf())
+
+for step in range(n_steps):
+    # Setup
+    # key, t_key = jr.split(key)
+    # t = jr.randint(t_key, (paas,), 30, sde.N-10)
+    t = int((2 * jax.nn.sigmoid(-6 * step / n_steps)) * sde.N)
+    # t = jnp.ones((paas,), dtype=jnp.int32) * int(((n_steps-step)/n_steps)*sde.N)
+
+    x_pi, key = make_step(x_pi, t, key)
+    # print(f"Step {step}, t {t[0]/sde.N:.3f}, Loss {loss:.3f}", end="\r")
+    print(f"Step {step}, t {t/sde.N:.3f}", end="\r")
+    if step % 100 == 0 and step:
+        # plt.imshow(inverse_scaler(jax.vmap(siren)(grid).reshape(img_size, img_size, 3)))
+        display.clear_output(wait=True)
+        image1.set_data(inverse_scaler(x_pi))
+        display.display(plt.gcf())
 
 
 class NystromPrecond(cola.ops.LinearOperator):
@@ -312,12 +295,6 @@ def get_matrices(x, t, key):
     P = cola.ops.I_like(H)  # NystromPrecond(H, rank=30, mu=1e-1, key=key)
     eps = 1e-2 * cola.eigmax(H, alg=PowerIteration(max_iter=5))  # P.adjusted_mu
 
-    # ! ============= ! #
-    # ! spectrum step ! #
-    log_spectrum_results(H, alg=cola.Eigh(), results=spectrum_results, output_path=output_path)
-    # ! spectrum step ! #
-    # ! ============= ! #
-
     reg_H = cola.PSD(H + eps * cola.ops.I_like(H))
     # U = cola.lazify(P.U)
     # D2 = cola.ops.Diagonal(jnp.sqrt(1+P.subspace_scaling[:,0])-1)
@@ -331,8 +308,7 @@ def get_matrices(x, t, key):
     return inv_H, isqrt_H
 
 
-# TODO: yilun's changes in commenting this out
-# @jax.jit
+@jax.jit
 def make_step(x_pi, t, key):
     # Calculate step size
     alpha = sde.alphas[t]
@@ -362,11 +338,12 @@ image1 = ax1.imshow(inverse_scaler(x_pi))
 key = jr.PRNGKey(101)
 x_pi = jr.normal(key, (32, 32, 3))
 
-# display.clear_output(wait=True)
-# image1.set_data(inverse_scaler(x_pi))
-# display.display(plt.gcf())
+display.clear_output(wait=True)
+image1.set_data(inverse_scaler(x_pi))
+display.display(plt.gcf())
 
 for step in range(n_steps):
+
     # Setup
     # key, t_key = jr.split(key)
     # t = jr.randint(t_key, (paas,), 30, sde.N-10)
@@ -376,9 +353,31 @@ for step in range(n_steps):
     x_pi, key = make_step(x_pi, t, key)
     # print(f"Step {step}, t {t[0]/sde.N:.3f}, Loss {loss:.3f}", end="\r")
     print(f"Step {step}, t {t/sde.N:.3f}", end="\r")
+    if step % 10 == 0 and step:
+        # plt.imshow(inverse_scaler(jax.vmap(siren)(grid).reshape(img_size, img_size, 3)))
+        display.clear_output(wait=True)
+        image1.set_data(inverse_scaler(x_pi))
+        display.display(plt.gcf())
 
-    # if step % 10 == 0 and step:
-    #     # plt.imshow(inverse_scaler(jax.vmap(siren)(grid).reshape(img_size, img_size, 3)))
-    #     display.clear_output(wait=True)
-    #     image1.set_data(inverse_scaler(x_pi))
-    #     display.display(plt.gcf())
+key = jr.PRNGKey(101)
+x = jr.normal(key, (32, 32, 3))
+
+invH, isqrtH, P, H = get_matrices(x, 1 - 10 / sde.N, key)
+
+Hdense = P.to_dense()
+es = jnp.linalg.eigvalsh(Hdense)
+plt.plot(es)
+
+P.Lambda
+
+key = jr.PRNGKey(101)
+x = jr.normal(key, (32, 32, 3))
+
+invH, isqrtH = get_matrices(x, 1 - 10 / sde.N, key)
+
+invH
+
+x = jr.normal(key, (32, 32, 3))
+e, v = cola.eig(score_hessian(x.reshape(-1), 1 - 10 / sde.N), k=10, which='SM', alg=Lanczos(max_iters=30))
+
+e

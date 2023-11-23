@@ -37,16 +37,13 @@ _PREDICTORS = {}
 
 def register_predictor(cls=None, *, name=None):
     """A decorator for registering predictor classes."""
-
     def _register(cls):
         if name is None:
             local_name = cls.__name__
         else:
             local_name = name
         if local_name in _PREDICTORS:
-            raise ValueError(
-                f"Already registered model with name: {local_name}"
-            )
+            raise ValueError(f"Already registered model with name: {local_name}")
         _PREDICTORS[local_name] = cls
         return cls
 
@@ -58,16 +55,13 @@ def register_predictor(cls=None, *, name=None):
 
 def register_corrector(cls=None, *, name=None):
     """A decorator for registering corrector classes."""
-
     def _register(cls):
         if name is None:
             local_name = cls.__name__
         else:
             local_name = name
         if local_name in _CORRECTORS:
-            raise ValueError(
-                f"Already registered model with name: {local_name}"
-            )
+            raise ValueError(f"Already registered model with name: {local_name}")
         _CORRECTORS[local_name] = cls
         return cls
 
@@ -138,7 +132,6 @@ def get_sampling_fn(config, sde, model, shape, inverse_scaler, eps):
 
 class Predictor(abc.ABC):
     """The abstract class for a predictor algorithm."""
-
     def __init__(self, sde, score_fn, probability_flow=False):
         super().__init__()
         self.sde = sde
@@ -164,7 +157,6 @@ class Predictor(abc.ABC):
 
 class Corrector(abc.ABC):
     """The abstract class for a corrector algorithm."""
-
     def __init__(self, sde, score_fn, snr, n_steps):
         super().__init__()
         self.sde = sde
@@ -218,18 +210,11 @@ class ReverseDiffusionPredictor(Predictor):
 @register_predictor(name="ancestral_sampling")
 class AncestralSamplingPredictor(Predictor):
     """The ancestral sampling predictor. Currently only supports VE/VP SDEs."""
-
     def __init__(self, sde, score_fn, probability_flow=False):
         super().__init__(sde, score_fn, probability_flow)
-        if not isinstance(sde, sde_lib.VPSDE) and not isinstance(
-            sde, sde_lib.VESDE
-        ):
-            raise NotImplementedError(
-                f"SDE class {sde.__class__.__name__} not yet supported."
-            )
-        assert (
-            not probability_flow
-        ), "Probability flow not supported by ancestral sampling"
+        if not isinstance(sde, sde_lib.VPSDE) and not isinstance(sde, sde_lib.VESDE):
+            raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
+        assert (not probability_flow), "Probability flow not supported by ancestral sampling"
 
     def vesde_update_fn(self, rng, x, t):
         sde = self.sde
@@ -242,10 +227,7 @@ class AncestralSamplingPredictor(Predictor):
         )
         score = self.score_fn(x, t)
         x_mean = x + batch_mul(score, sigma**2 - adjacent_sigma**2)
-        std = jnp.sqrt(
-            (adjacent_sigma**2 * (sigma**2 - adjacent_sigma**2))
-            / (sigma**2)
-        )
+        std = jnp.sqrt((adjacent_sigma**2 * (sigma**2 - adjacent_sigma**2)) / (sigma**2))
         noise = random.normal(rng, x.shape)
         x = x_mean + batch_mul(std, noise)
         return x, x_mean
@@ -255,9 +237,7 @@ class AncestralSamplingPredictor(Predictor):
         timestep = (t * (sde.N - 1) / sde.T).astype(jnp.int32)
         beta = sde.discrete_betas[timestep]
         score = self.score_fn(x, t)
-        x_mean = batch_mul(
-            (x + batch_mul(beta, score)), 1.0 / jnp.sqrt(1.0 - beta)
-        )
+        x_mean = batch_mul((x + batch_mul(beta, score)), 1.0 / jnp.sqrt(1.0 - beta))
         noise = random.normal(rng, x.shape)
         x = x_mean + batch_mul(jnp.sqrt(beta), noise)
         return x, x_mean
@@ -272,7 +252,6 @@ class AncestralSamplingPredictor(Predictor):
 @register_predictor(name="none")
 class NonePredictor(Predictor):
     """An empty predictor that does nothing."""
-
     def __init__(self, sde, score_fn, probability_flow=False):
         pass
 
@@ -284,14 +263,9 @@ class NonePredictor(Predictor):
 class LangevinCorrector(Corrector):
     def __init__(self, sde, score_fn, snr, n_steps):
         super().__init__(sde, score_fn, snr, n_steps)
-        if (
-            not isinstance(sde, sde_lib.VPSDE)
-            and not isinstance(sde, sde_lib.VESDE)
-            and not isinstance(sde, sde_lib.subVPSDE)
-        ):
-            raise NotImplementedError(
-                f"SDE class {sde.__class__.__name__} not yet supported."
-            )
+        if (not isinstance(sde, sde_lib.VPSDE) and not isinstance(sde, sde_lib.VESDE)
+                and not isinstance(sde, sde_lib.subVPSDE)):
+            raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
 
     def update_fn(self, rng, x, t):
         sde = self.sde
@@ -309,15 +283,11 @@ class LangevinCorrector(Corrector):
             grad = score_fn(x, t)
             rng, step_rng = jax.random.split(rng)
             noise = jax.random.normal(step_rng, x.shape)
-            grad_norm = jnp.linalg.norm(
-                grad.reshape((grad.shape[0], -1)), axis=-1
-            ).mean()
+            grad_norm = jnp.linalg.norm(grad.reshape((grad.shape[0], -1)), axis=-1).mean()
             grad_norm = jax.lax.pmean(grad_norm, axis_name="batch")
-            noise_norm = jnp.linalg.norm(
-                noise.reshape((noise.shape[0], -1)), axis=-1
-            ).mean()
+            noise_norm = jnp.linalg.norm(noise.reshape((noise.shape[0], -1)), axis=-1).mean()
             noise_norm = jax.lax.pmean(noise_norm, axis_name="batch")
-            step_size = (target_snr * noise_norm / grad_norm) ** 2 * 2 * alpha
+            step_size = (target_snr * noise_norm / grad_norm)**2 * 2 * alpha
             x_mean = x + batch_mul(step_size, grad)
             x = x_mean + batch_mul(noise, jnp.sqrt(step_size * 2))
             return rng, x, x_mean
@@ -332,17 +302,11 @@ class AnnealedLangevinDynamics(Corrector):
 
     We include this corrector only for completeness. It was not directly used in our paper.
     """
-
     def __init__(self, sde, score_fn, snr, n_steps):
         super().__init__(sde, score_fn, snr, n_steps)
-        if (
-            not isinstance(sde, sde_lib.VPSDE)
-            and not isinstance(sde, sde_lib.VESDE)
-            and not isinstance(sde, sde_lib.subVPSDE)
-        ):
-            raise NotImplementedError(
-                f"SDE class {sde.__class__.__name__} not yet supported."
-            )
+        if (not isinstance(sde, sde_lib.VPSDE) and not isinstance(sde, sde_lib.VESDE)
+                and not isinstance(sde, sde_lib.subVPSDE)):
+            raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
 
     def update_fn(self, rng, x, t):
         sde = self.sde
@@ -362,7 +326,7 @@ class AnnealedLangevinDynamics(Corrector):
             grad = score_fn(x, t)
             rng, step_rng = jax.random.split(rng)
             noise = jax.random.normal(step_rng, x.shape)
-            step_size = (target_snr * std) ** 2 * 2 * alpha
+            step_size = (target_snr * std)**2 * 2 * alpha
             x_mean = x + batch_mul(step_size, grad)
             x = x_mean + batch_mul(noise, jnp.sqrt(step_size * 2))
             return rng, x, x_mean
@@ -374,7 +338,6 @@ class AnnealedLangevinDynamics(Corrector):
 @register_corrector(name="none")
 class NoneCorrector(Corrector):
     """An empty corrector that does nothing."""
-
     def __init__(self, sde, score_fn, snr, n_steps):
         pass
 
@@ -382,9 +345,7 @@ class NoneCorrector(Corrector):
         return x, x
 
 
-def shared_predictor_update_fn(
-    rng, state, x, t, sde, model, predictor, probability_flow, continuous
-):
+def shared_predictor_update_fn(rng, state, x, t, sde, model, predictor, probability_flow, continuous):
     """A wrapper that configures and returns the update function of predictors."""
     score_fn = mutils.get_score_fn(
         sde,
@@ -402,9 +363,7 @@ def shared_predictor_update_fn(
     return predictor_obj.update_fn(rng, x, t)
 
 
-def shared_corrector_update_fn(
-    rng, state, x, t, sde, model, corrector, continuous, snr, n_steps
-):
+def shared_corrector_update_fn(rng, state, x, t, sde, model, corrector, continuous, snr, n_steps):
     """A wrapper tha configures and returns the update function of correctors."""
     score_fn = mutils.get_score_fn(
         sde,
@@ -535,7 +494,6 @@ def get_ode_sampler(
       A sampling function that takes random states, and a replicated training state and returns samples
       as well as the number of function evaluations during sampling.
     """
-
     @jax.pmap
     def denoise_update_fn(rng, state, x):
         score_fn = get_score_fn(
@@ -547,10 +505,8 @@ def get_ode_sampler(
             continuous=True,
         )
         # Reverse diffusion predictor for denoising
-        predictor_obj = ReverseDiffusionPredictor(
-            sde, score_fn, probability_flow=False
-        )
-        vec_eps = jnp.ones((x.shape[0],)) * eps
+        predictor_obj = ReverseDiffusionPredictor(sde, score_fn, probability_flow=False)
+        vec_eps = jnp.ones((x.shape[0], )) * eps
         _, x = predictor_obj.update_fn(rng, x, vec_eps)
         return x
 
@@ -583,14 +539,12 @@ def get_ode_sampler(
         rng, step_rng = random.split(rng)
         if z is None:
             # If not represent, sample the latent code from the prior distibution of the SDE.
-            x = sde.prior_sampling(
-                step_rng, (jax.local_device_count(),) + shape
-            )
+            x = sde.prior_sampling(step_rng, (jax.local_device_count(), ) + shape)
         else:
             x = z
 
         def ode_func(t, x):
-            x = from_flattened_numpy(x, (jax.local_device_count(),) + shape)
+            x = from_flattened_numpy(x, (jax.local_device_count(), ) + shape)
             vec_t = jnp.ones((x.shape[0], x.shape[1])) * t
             drift = drift_fn(pstate, x, vec_t)
             return to_flattened_numpy(drift)
@@ -605,9 +559,7 @@ def get_ode_sampler(
             method=method,
         )
         nfe = solution.nfev
-        x = jnp.asarray(solution.y[:, -1]).reshape(
-            (jax.local_device_count(),) + shape
-        )
+        x = jnp.asarray(solution.y[:, -1]).reshape((jax.local_device_count(), ) + shape)
 
         # Denoising is equivalent to running one predictor step without adding noise
         if denoise:

@@ -53,7 +53,6 @@ def get_data_inverse_scaler(config):
 #     )
 #     return tf.cast(image, tf.uint8)
 
-
 # def resize_small(image, resolution):
 #     """Shrink an image to the given resolution."""
 #     h, w = image.shape[0], image.shape[1]
@@ -62,13 +61,11 @@ def get_data_inverse_scaler(config):
 #     w = tf.round(w * ratio, tf.int32)
 #     return tf.image.resize(image, [h, w], antialias=True)
 
-
 # def central_crop(image, size):
 #     """Crop the center of an image to the given size."""
 #     top = (image.shape[0] - size) // 2
 #     left = (image.shape[1] - size) // 2
 #     return tf.image.crop_to_bounding_box(image, top, left, size, size)
-
 
 # def get_dataset(
 #     config, additional_dim=None, uniform_dequantization=False, evaluation=False

@@ -12,7 +12,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """All functions and modules related to model definition.
 """
 from typing import Any
@@ -46,16 +45,13 @@ _MODELS = {}
 
 def register_model(cls=None, *, name=None):
     """A decorator for registering model classes."""
-
     def _register(cls):
         if name is None:
             local_name = cls.__name__
         else:
             local_name = name
         if local_name in _MODELS:
-            raise ValueError(
-                f"Already registered model with name: {local_name}"
-            )
+            raise ValueError(f"Already registered model with name: {local_name}")
         _MODELS[local_name] = cls
         return cls
 
@@ -81,8 +77,7 @@ def get_sigmas(config):
             jnp.log(config.model.sigma_max),
             jnp.log(config.model.sigma_min),
             config.model.num_scales,
-        )
-    )
+        ))
 
     return sigmas
 
@@ -93,9 +88,7 @@ def get_ddpm_params(config):
     # parameters need to be adapted if number of time steps differs from 1000
     beta_start = config.model.beta_min / config.model.num_scales
     beta_end = config.model.beta_max / config.model.num_scales
-    betas = np.linspace(
-        beta_start, beta_end, num_diffusion_timesteps, dtype=np.float64
-    )
+    betas = np.linspace(beta_start, beta_end, num_diffusion_timesteps, dtype=np.float64)
 
     alphas = 1.0 - betas
     alphas_cumprod = np.cumprod(alphas, axis=0)
@@ -129,9 +122,7 @@ def init_model(rng, config):
     fake_label = jnp.zeros(label_shape, dtype=jnp.int32)
     params_rng, dropout_rng = jax.random.split(rng)
     model = model_def()
-    variables = model.init(
-        {"params": params_rng, "dropout": dropout_rng}, fake_input, fake_label
-    )
+    variables = model.init({"params": params_rng, "dropout": dropout_rng}, fake_input, fake_label)
     # Variables is a `flax.FrozenDict`. It is immutable and respects functional programming
     init_model_state, initial_params = variables.pop("params")
     return model, init_model_state, initial_params
@@ -149,7 +140,6 @@ def get_model_fn(model, params, states, train=False):
     Returns:
       A model function.
     """
-
     def model_fn(x, labels, rng=None):
         """Compute the output of the score-based model.
 
@@ -252,16 +242,14 @@ def get_score_fn(
                 return score
 
     else:
-        raise NotImplementedError(
-            f"SDE class {sde.__class__.__name__} not yet supported."
-        )
+        raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
 
     return score_fn
 
 
 def to_flattened_numpy(x):
     """Flatten a JAX array `x` and convert it to numpy."""
-    return np.asarray(x.reshape((-1,)))
+    return np.asarray(x.reshape((-1, )))
 
 
 def from_flattened_numpy(x, shape):
@@ -298,7 +286,6 @@ def from_flattened_numpy(x, shape):
 
 def get_logit_fn(classifier, classifier_params):
     """Create a logit function for the classifier."""
-
     def preprocess(data):
         image_mean = jnp.asarray([[[0.49139968, 0.48215841, 0.44653091]]])
         image_std = jnp.asarray([[[0.24703223, 0.24348513, 0.26158784]]])
@@ -329,13 +316,10 @@ def get_logit_fn(classifier, classifier_params):
 
 def get_classifier_grad_fn(logit_fn):
     """Create the gradient function for the classifier in use of class-conditional sampling."""
-
     def grad_fn(data, ve_noise_scale, labels):
         def prob_fn(data):
             logits = logit_fn(data, ve_noise_scale)
-            prob = jax.nn.log_softmax(logits, axis=-1)[
-                jnp.arange(labels.shape[0]), labels
-            ].sum()
+            prob = jax.nn.log_softmax(logits, axis=-1)[jnp.arange(labels.shape[0]), labels].sum()
             return prob
 
         return jax.grad(prob_fn)(data)
