@@ -258,7 +258,6 @@ def evaluate(config,
   inceptionv3 = config.data.image_size >= 256
   inception_model = evaluation.get_inception_model(inceptionv3=inceptionv3)
   
-  # breakpoint()
   begin_ckpt = config.eval.begin_ckpt
   logging.info("begin checkpoint: %d" % (begin_ckpt,))
   for ckpt in range(begin_ckpt, config.eval.end_ckpt + 1):
@@ -283,6 +282,7 @@ def evaluate(config,
         time.sleep(120)
         state = restore_checkpoint(ckpt_path, state, device=config.device)
     ema.copy_to(score_model.parameters())
+    
     # Compute the loss function on the full evaluation dataset if loss computation is enabled
     if config.eval.enable_loss:
       all_losses = []
@@ -407,3 +407,273 @@ def evaluate(config,
         io_buffer = io.BytesIO()
         np.savez_compressed(io_buffer, IS=inception_score, fid=fid, kid=kid)
         f.write(io_buffer.getvalue())
+
+
+def run_accelerated_sampling(config,
+             workdir,
+             eval_folder="eval"):
+  """run_accelerated_sampling.
+
+  Args:
+    config: Configuration to use.
+    workdir: Working directory for checkpoints.
+    eval_folder: The subfolder for storing evaluation results. Default to
+      "eval".
+  """
+  # Create directory to eval_folder
+  eval_dir = os.path.join(workdir, eval_folder)
+  tf.io.gfile.makedirs(eval_dir)
+
+  # Build data pipeline
+  train_ds, eval_ds, _ = datasets.get_dataset(config,
+                                              uniform_dequantization=config.data.uniform_dequantization,
+                                              evaluation=True)
+  
+  # Create data normalizer and its inverse
+  scaler = datasets.get_data_scaler(config)
+  inverse_scaler = datasets.get_data_inverse_scaler(config)
+
+  # Initialize model
+  score_model = mutils.create_model(config)
+  optimizer = losses.get_optimizer(config, score_model.parameters())
+  ema = ExponentialMovingAverage(score_model.parameters(), decay=config.model.ema_rate)
+  state = dict(optimizer=optimizer, model=score_model, ema=ema, step=0)
+
+  checkpoint_dir = os.path.join(workdir, "checkpoints")
+  
+  # Setup SDEs
+  if config.training.sde.lower() == 'vpsde':
+    sde = sde_lib.VPSDE(beta_min=config.model.beta_min, beta_max=config.model.beta_max, N=config.model.num_scales)
+    sampling_eps = 1e-3
+  elif config.training.sde.lower() == 'subvpsde':
+    sde = sde_lib.subVPSDE(beta_min=config.model.beta_min, beta_max=config.model.beta_max, N=config.model.num_scales)
+    sampling_eps = 1e-3
+  elif config.training.sde.lower() == 'vesde':
+    sde = sde_lib.VESDE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max, N=config.model.num_scales)
+    sampling_eps = 1e-5
+  else:
+    raise NotImplementedError(f"SDE {config.training.sde} unknown.")
+
+  # Create the one-step evaluation function when loss computation is enabled
+  if config.eval.enable_loss:
+    optimize_fn = losses.optimization_manager(config)
+    continuous = config.training.continuous
+    likelihood_weighting = config.training.likelihood_weighting
+
+    reduce_mean = config.training.reduce_mean
+    eval_step = losses.get_step_fn(sde, train=False, optimize_fn=optimize_fn,
+                                   reduce_mean=reduce_mean,
+                                   continuous=continuous,
+                                   likelihood_weighting=likelihood_weighting)
+
+
+  # Create data loaders for likelihood evaluation. Only evaluate on uniformly dequantized data
+  train_ds_bpd, eval_ds_bpd, _ = datasets.get_dataset(config,
+                                                      uniform_dequantization=True, evaluation=True)
+  if config.eval.bpd_dataset.lower() == 'train':
+    ds_bpd = train_ds_bpd
+    bpd_num_repeats = 1
+  elif config.eval.bpd_dataset.lower() == 'test':
+    # Go over the dataset 5 times when computing likelihood on the test dataset
+    ds_bpd = eval_ds_bpd
+    bpd_num_repeats = 5
+  else:
+    raise ValueError(f"No bpd dataset {config.eval.bpd_dataset} recognized.")
+
+  # Build the likelihood computation function when likelihood is enabled
+  if config.eval.enable_bpd:
+    likelihood_fn = likelihood.get_likelihood_fn(sde, inverse_scaler)
+
+  # Build the sampling function when sampling is enabled
+  if config.eval.enable_sampling:
+    sampling_shape = (config.eval.batch_size,
+                      config.data.num_channels,
+                      config.data.image_size, config.data.image_size)
+    sampling_fn = sampling.get_sampling_fn(config, sde, sampling_shape, inverse_scaler, sampling_eps)
+
+  # Use inceptionV3 for images with resolution higher than 256.
+  inceptionv3 = config.data.image_size >= 256
+  inception_model = evaluation.get_inception_model(inceptionv3=inceptionv3)
+  
+  begin_ckpt = config.eval.begin_ckpt
+  logging.info("begin checkpoint: %d" % (begin_ckpt,))
+
+  ckpt = config.eval.end_ckpt
+  # Wait if the target checkpoint doesn't exist yet
+  waiting_message_printed = False
+  ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}.pth".format(ckpt))
+
+  while not tf.io.gfile.exists(ckpt_filename):
+    if not waiting_message_printed:
+      logging.warning("Waiting for the arrival of checkpoint_%d" % (ckpt,))
+      waiting_message_printed = True
+    time.sleep(60)
+
+  # Wait for 2 additional mins in case the file exists but is not ready for reading
+  ckpt_path = os.path.join(checkpoint_dir, f'checkpoint_{ckpt}.pth')
+
+
+  # loaded_state = torch.load(ckpt_path, map_location=config.device)
+  # state['optimizer'].load_state_dict(loaded_state['optimizer'])
+  # state['model'].load_state_dict(loaded_state['model'], strict=False)
+  # state['ema'].load_state_dict(loaded_state['ema'])
+  # state['step'] = loaded_state['step']
+  # score_model.load_state_dict(loaded_state['model'], strict=False)
+  # score_fn = mutils.get_score_fn(sde, score_model, new_params, state.model_state, train=False, continuous=config.training.continuous)
+  
+  try:
+    state = restore_checkpoint(ckpt_path, state, device=config.device)
+  except:
+    time.sleep(60)
+    try:
+      state = restore_checkpoint(ckpt_path, state, device=config.device)
+    except:
+      time.sleep(120)
+      state = restore_checkpoint(ckpt_path, state, device=config.device)
+  ema.copy_to(score_model.parameters())
+
+  breakpoint()
+  score_fn = mutils.get_score_fn(sde, score_model, train=False, continuous=config.training.continuous)
+
+  # TODO: random sample
+  x_pi = torch.randn((32, 32, 3))
+
+  import matplotlib.pyplot as plt
+
+  fig, ax1 = plt.subplots(1, 1, figsize=(6, 6))
+  image1 = ax1.imshow(inverse_scaler(x_pi))
+
+  # display.clear_output(wait=True)
+  image1.set_data(inverse_scaler(x_pi))
+  # display.display(plt.gcf())
+
+  target_snr = 0.16
+  n_steps = 5000
+
+  # for step in range(n_steps):
+  #     # Setup
+  #     # key, t_key = jr.split(key)
+  #     # t = jr.randint(t_key, (paas,), 30, sde.N-10)
+  #     # t = int((2*jax.nn.sigmoid(-6*step/n_steps))*sde.N)
+  #     t = int((2 * torch.sigmoid(-6 * step / n_steps) * sde.N).item())
+
+  #     # t = jnp.ones((paas,), dtype=jnp.int32) * int(((n_steps-step)/n_steps)*sde.N)
+
+  #     x_pi, key = make_step(x_pi, t, key)
+  #     # print(f"Step {step}, t {t[0]/sde.N:.3f}, Loss {loss:.3f}", end="\r")
+  #     print(f"Step {step}, t {t/sde.N:.3f}", end="\r")
+  #     if step % 100 == 0 and step:
+  #         # plt.imshow(inverse_scaler(jax.vmap(siren)(grid).reshape(img_size, img_size, 3)))
+  #         display.clear_output(wait=True)
+  #         image1.set_data(inverse_scaler(x_pi))
+  #         display.display(plt.gcf())
+
+
+  # def make_step(x_pi, t, key):
+  #     # Calculate step size
+  #     alpha = sde.alphas[t]
+  #     std = sde.marginal_prob(x_pi[None,...], jnp.ones(1)*t/(sde.N-1))[1]
+  #     step_size = (target_snr * std) ** 2 * 2 * alpha
+
+  #     # Calculate score
+  #     score = score_fn(x_pi[None,...], jnp.ones(1)*t/(sde.N-1))
+
+  #     # Noise for Langevin
+  #     key, eps_key = jr.split(key)
+  #     noise = jr.normal(eps_key, x_pi.shape)[None,...]
+
+  #     # Langevin update
+  #     x_mean = x_pi + utils.batch_mul(step_size, score)
+  #     x_pi = x_mean + utils.batch_mul(noise, jnp.sqrt(step_size * 2))
+  #     x_pi = x_pi[0]
+
+  #     loss = None
+  #     key = jr.split(key)[0]
+  #     return x_pi, key
+
+
+
+
+
+
+
+  # Generate samples and compute IS/FID/KID when enabled
+  if config.eval.enable_sampling:
+    num_sampling_rounds = config.eval.num_samples // config.eval.batch_size + 1
+    for r in range(num_sampling_rounds):
+      logging.info("sampling -- ckpt: %d, round: %d" % (ckpt, r))
+
+      # Directory to save samples. Different for each host to avoid writing conflicts
+      this_sample_dir = os.path.join(
+        eval_dir, f"ckpt_{ckpt}")
+      tf.io.gfile.makedirs(this_sample_dir)
+      samples, n = sampling_fn(score_model)
+      samples = np.clip(samples.permute(0, 2, 3, 1).cpu().numpy() * 255., 0, 255).astype(np.uint8)
+      samples = samples.reshape(
+        (-1, config.data.image_size, config.data.image_size, config.data.num_channels))
+      # Write samples to disk or Google Cloud Storage
+      with tf.io.gfile.GFile(
+          os.path.join(this_sample_dir, f"samples_{r}.npz"), "wb") as fout:
+        io_buffer = io.BytesIO()
+        np.savez_compressed(io_buffer, samples=samples)
+        fout.write(io_buffer.getvalue())
+
+      # Force garbage collection before calling TensorFlow code for Inception network
+      gc.collect()
+      latents = evaluation.run_inception_distributed(samples, inception_model,
+                                                      inceptionv3=inceptionv3)
+      # Force garbage collection again before returning to JAX code
+      gc.collect()
+      # Save latent represents of the Inception network to disk or Google Cloud Storage
+      with tf.io.gfile.GFile(
+          os.path.join(this_sample_dir, f"statistics_{r}.npz"), "wb") as fout:
+        io_buffer = io.BytesIO()
+        np.savez_compressed(
+          io_buffer, pool_3=latents["pool_3"], logits=latents["logits"])
+        fout.write(io_buffer.getvalue())
+
+    # Compute inception scores, FIDs and KIDs.
+    # Load all statistics that have been previously computed and saved for each host
+    all_logits = []
+    all_pools = []
+    this_sample_dir = os.path.join(eval_dir, f"ckpt_{ckpt}")
+    stats = tf.io.gfile.glob(os.path.join(this_sample_dir, "statistics_*.npz"))
+    for stat_file in stats:
+      with tf.io.gfile.GFile(stat_file, "rb") as fin:
+        stat = np.load(fin)
+        if not inceptionv3:
+          all_logits.append(stat["logits"])
+        all_pools.append(stat["pool_3"])
+
+    if not inceptionv3:
+      all_logits = np.concatenate(all_logits, axis=0)[:config.eval.num_samples]
+    all_pools = np.concatenate(all_pools, axis=0)[:config.eval.num_samples]
+
+    # Load pre-computed dataset statistics.
+    data_stats = evaluation.load_dataset_stats(config)
+    data_pools = data_stats["pool_3"]
+
+    # Compute FID/KID/IS on all samples together.
+    if not inceptionv3:
+      inception_score = tfgan.eval.classifier_score_from_logits(all_logits)
+    else:
+      inception_score = -1
+
+    fid = tfgan.eval.frechet_classifier_distance_from_activations(
+      data_pools, all_pools)
+    # Hack to get tfgan KID work for eager execution.
+    tf_data_pools = tf.convert_to_tensor(data_pools)
+    tf_all_pools = tf.convert_to_tensor(all_pools)
+    kid = tfgan.eval.kernel_classifier_distance_from_activations(
+      tf_data_pools, tf_all_pools).numpy()
+    del tf_data_pools, tf_all_pools
+
+    logging.info(
+      "ckpt-%d --- inception_score: %.6e, FID: %.6e, KID: %.6e" % (
+        ckpt, inception_score, fid, kid))
+
+    with tf.io.gfile.GFile(os.path.join(eval_dir, f"report_{ckpt}.npz"),
+                            "wb") as f:
+      io_buffer = io.BytesIO()
+      np.savez_compressed(io_buffer, IS=inception_score, fid=fid, kid=kid)
+      f.write(io_buffer.getvalue())
