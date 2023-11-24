@@ -4,15 +4,22 @@ import numpy as np
 from PIL import Image
 from matplotlib import pyplot as plt
 import ast
+import argparse
 
-sample_storage_path = '/scratch/yk2516/repos/diffusion_model/second-diffusion/score_sde_pytorch/work_dir/eval/ckpt_26'
+parser = argparse.ArgumentParser()
+parser.add_argument('--sample_storage_path', help='an example looks like /scratch/yk2516/repos/diffusion_model/second-diffusion/score_sde_pytorch/work_dir/eval/ckpt_26/2023-11-24/12-42-02')
+args = parser.parse_args()
+sample_storage_path = args.sample_storage_path
 
-for i in range(10):
+# some config to manually play around
+num_samples = 1
+
+for i in range(num_samples):
     samples_i = np.load(os.path.join(sample_storage_path, f'samples_{i}.npz'))
 
     # save to png
     image_samples_i = Image.fromarray(samples_i['samples'].astype('uint8').squeeze())
-    image_samples_i.save(os.path.join(sample_storage_path, f'samples_{i}.png'))
+    image_samples_i.save(os.path.join(sample_storage_path, f'samples_sde_N1000_{i}.png'))
 
     # pickle
     # with open('/scratch/yk2516/repos/diffusion_model/second-diffusion/score_sde_pytorch/work_dir/logs/eigs.pkl', 'rb') as file:
@@ -21,15 +28,15 @@ for i in range(10):
     # print(f"len(loaded_data)={len(loaded_data)}")
 
     # txt
-    file_path = '/scratch/yk2516/repos/diffusion_model/second-diffusion/score_sde_pytorch/work_dir/logs/eigs.txt'
-
+    file_path = os.path.join(sample_storage_path, 'eigs_sde_N1000.txt')
+    
     with open(file_path, 'r') as file:
         lines = file.readlines()
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
 
     # plt.figure()
-    for j, line in enumerate(lines[i*10:(i+1)*10]):
+    for j, line in enumerate(lines[i*20:(i+1)*20]):
         actual_eigvals = ast.literal_eval(line.strip())
         sorted_actual_eigvals = sorted(actual_eigvals, key=lambda x: x.real)
         # plt.plot(sorted_actual_eigvals, label=f'iter_{(j+1)*100}')
@@ -49,7 +56,7 @@ for i in range(10):
     plt.tight_layout()
 
     # Save the figure
-    plt.savefig(os.path.join(sample_storage_path, f'hessian_eigvals_plot_samples_{i}.png'))
+    plt.savefig(os.path.join(sample_storage_path, f'hessian_eigvals_sde_N1000_plot_samples_{i}.png'))
 
     # Show the plots
     plt.show()

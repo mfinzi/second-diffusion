@@ -240,7 +240,7 @@ class AncestralSamplingPredictor(Predictor):
     x = x_mean + torch.sqrt(beta)[:, None, None, None] * noise
 
     # Computing Hessian Eigenvalues (Every 100 Iterations)
-    if (timestep.item() % 100) == 0:
+    if (timestep.item() % 100) == 0 or timestep.item() in [910, 920, 930, 940, 950, 960, 970, 980, 990, 995]:
       print(f"timestep.item()={timestep.item()} for hessian computation")
       
       tic = time.time()
@@ -251,9 +251,9 @@ class AncestralSamplingPredictor(Predictor):
       output_hessian_computation = {"eigvals": np.array(H_eigvals.cpu()), "timestep": timestep.item(), "time": toc - tic, "method": "torch.linalg.eigvals"}
 
       use_highest = True
-      filepath = f"{self.workdir}/logs/eigs_sde_N{sde.N}.pkl"
-      filepath_txt = f"{self.workdir}/logs/eigs_sde_N{sde.N}.txt"
-      filepath_time_txt = f'{self.workdir}/logs/eigs_sde_N{sde.N}_time.txt'
+      filepath = f"{self.workdir}/eigs_sde_N{sde.N}.pkl"
+      filepath_txt = f"{self.workdir}/eigs_sde_N{sde.N}.txt"
+      filepath_time_txt = f'{self.workdir}/eigs_sde_N{sde.N}_time.txt'
 
       protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
 

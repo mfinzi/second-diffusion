@@ -20,6 +20,7 @@ import gc
 import io
 import os
 import time
+import datetime
 
 import numpy as np
 import tensorflow as tf
@@ -428,6 +429,17 @@ def run_accelerated_sampling(config,
   log_dir = os.path.join(workdir, "logs")
   tf.io.gfile.makedirs(log_dir)
 
+  # ? this is a temporary change
+  ckpt = config.eval.end_ckpt
+
+  now = datetime.datetime.now()
+  formatted_date = now.strftime('%Y-%m-%d')
+  formatted_time = now.strftime('%H-%M-%S')
+  logging_directory = f'{formatted_date}/{formatted_time}'
+  this_sample_dir = os.path.join(eval_dir, f"ckpt_{ckpt}", logging_directory)
+  tf.io.gfile.makedirs(this_sample_dir)
+  # breakpoint()
+  
   # Build data pipeline
   train_ds, eval_ds, _ = datasets.get_dataset(config,
                                               uniform_dequantization=config.data.uniform_dequantization,
@@ -493,7 +505,7 @@ def run_accelerated_sampling(config,
     sampling_shape = (config.eval.batch_size,
                       config.data.num_channels,
                       config.data.image_size, config.data.image_size)
-    sampling_fn = sampling.get_sampling_fn(config, sde, sampling_shape, inverse_scaler, sampling_eps, workdir=workdir)
+    sampling_fn = sampling.get_sampling_fn(config, sde, sampling_shape, inverse_scaler, sampling_eps, workdir=this_sample_dir)
 
   # Use inceptionV3 for images with resolution higher than 256.
   inceptionv3 = config.data.image_size >= 256
@@ -515,15 +527,6 @@ def run_accelerated_sampling(config,
 
   # Wait for 2 additional mins in case the file exists but is not ready for reading
   ckpt_path = os.path.join(checkpoint_dir, f'checkpoint_{ckpt}.pth')
-
-
-  # loaded_state = torch.load(ckpt_path, map_location=config.device)
-  # state['optimizer'].load_state_dict(loaded_state['optimizer'])
-  # state['model'].load_state_dict(loaded_state['model'], strict=False)
-  # state['ema'].load_state_dict(loaded_state['ema'])
-  # state['step'] = loaded_state['step']
-  # score_model.load_state_dict(loaded_state['model'], strict=False)
-  # score_fn = mutils.get_score_fn(sde, score_model, new_params, state.model_state, train=False, continuous=config.training.continuous)
   
   try:
     state = restore_checkpoint(ckpt_path, state, device=config.device)
@@ -546,9 +549,9 @@ def run_accelerated_sampling(config,
       logging.info("sampling -- ckpt: %d, round: %d" % (ckpt, r))
 
       # Directory to save samples. Different for each host to avoid writing conflicts
-      this_sample_dir = os.path.join(
-        eval_dir, f"ckpt_{ckpt}")
-      tf.io.gfile.makedirs(this_sample_dir)
+      # this_sample_dir = os.path.join(
+      #   eval_dir, f"ckpt_{ckpt}")
+      # tf.io.gfile.makedirs(this_sample_dir)
       samples, n = sampling_fn(score_model)
       samples = np.clip(samples.permute(0, 2, 3, 1).cpu().numpy() * 255., 0, 255).astype(np.uint8)
       samples = samples.reshape(
@@ -578,7 +581,7 @@ def run_accelerated_sampling(config,
     # Load all statistics that have been previously computed and saved for each host
     all_logits = []
     all_pools = []
-    this_sample_dir = os.path.join(eval_dir, f"ckpt_{ckpt}")
+    # this_sample_dir = os.path.join(eval_dir, f"ckpt_{ckpt}") # ? yilun commented this out since we're not computing FIDs / KIDs now
     stats = tf.io.gfile.glob(os.path.join(this_sample_dir, "statistics_*.npz"))
     for stat_file in stats:
       with tf.io.gfile.GFile(stat_file, "rb") as fin:
