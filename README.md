@@ -27,7 +27,7 @@ I have only ran this on an A100-80GB. It's possible to run into CUDA OOM error i
 
 ### pretrained checkpoints
 
-petrained checkpoint should be in `https://drive.google.com/drive/folders/1zDKcy3xbsN3F4AfyB_DfY_1oho89iKcf` and it's `checkpoint_26.pth`.
+petrained checkpoint should be in `https://drive.google.com/drive/folders/1zDKcy3xbsN3F4AfyB_DfY_1oho89iKcf` and it's `checkpoint_26.pth`. This checkpoint should be put under `[PATH]/second-diffusion/score_sde_pytorch/work_dir/checkpoints`. Here is an example `/scratch/yk2516/repos/diffusion_model/second-diffusion/score_sde_pytorch/work_dir/checkpoints/checkpoint_26.pth`
 
 ### command to get hessian eigenvalues based on the score_sde_pytorch
 
