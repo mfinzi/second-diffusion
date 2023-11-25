@@ -240,9 +240,8 @@ class AncestralSamplingPredictor(Predictor):
     x = x_mean + torch.sqrt(beta)[:, None, None, None] * noise
 
     # Computing Hessian Eigenvalues (Every 100 Iterations)
-    if (timestep.item() % 100) == 0 or timestep.item() in [910, 920, 930, 940, 950, 960, 970, 980, 990, 995]:
-      print(f"timestep.item()={timestep.item()} for hessian computation")
-      
+    if ((1000-timestep.item()) % 200) == 0 or (1000-timestep.item()) in [925, 950, 975, 990, 993, 995, 996, 997, 998, 999]:
+      print(f"(1000-timestep.item())={(1000-timestep.item())} for hessian computation", flush=True)
       tic = time.time()
       H = torch.autograd.functional.jacobian(partial(self.flat_score_fn,t=t), x.reshape(-1)) # it takes 26 seconds to finish this
       H_eigvals = torch.linalg.eigvals(H) # take 4 seconds to finish this
