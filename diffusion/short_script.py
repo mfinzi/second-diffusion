@@ -94,17 +94,17 @@ key = jr.PRNGKey(101)
 diag = jnp.abs(jr.normal(key, (3072,)))
 
 
-def score_fn(x, _):
-    shape = x.shape
-    out = -x.reshape(-1)
-    out = diag * out
-    return out.reshape(shape)
+# def score_fn(x, _):
+#     shape = x.shape
+#     out = -x.reshape(-1)
+#     out = diag * out
+#     return out.reshape(shape)
 
 
 i = 0
 target_snr = 0.16
-# n_steps = 2000
 n_steps = 100
+# n_steps = 2000
 
 key = jr.PRNGKey(101)
 x_pi = jr.normal(key, (32, 32, 3))
@@ -134,9 +134,12 @@ def get_matrices(x, t, key):
 
     reg_H = cola.PSD(H + eps * cola.ops.I_like(H))
     # log_spectrum_results(H, Lanczos(max_iters=20, tol=1e-3), results, output_path)
-    log_from_jax(reg_H, results, output_path)
-    inv_H = cola.linalg.inv(reg_H, alg=CG(max_iters=10, P=P))
-    isqrt_H = cola.linalg.isqrt(reg_H, alg=Lanczos(max_iters=10))
+    # log_from_jax(reg_H, output_path)
+    log_from_jax(H, output_path)
+    # inv_H = cola.linalg.inv(reg_H, alg=CG(max_iters=10, P=P))
+    # isqrt_H = cola.linalg.isqrt(reg_H, alg=Lanczos(max_iters=10))
+    inv_H = cola.ops.I_like(H)
+    isqrt_H = cola.ops.I_like(H)
     return inv_H, isqrt_H
 
 
