@@ -415,7 +415,8 @@ def evaluate(config,
 
 def run_accelerated_sampling(config,
              workdir,
-             eval_folder="eval"):
+             eval_folder="eval",
+             use_pred_cond = False):
   """run_accelerated_sampling.
 
   Args:
@@ -507,7 +508,7 @@ def run_accelerated_sampling(config,
     sampling_shape = (config.eval.batch_size,
                       config.data.num_channels,
                       config.data.image_size, config.data.image_size)
-    sampling_fn = sampling.get_sampling_fn(config, sde, sampling_shape, inverse_scaler, sampling_eps, workdir=this_sample_dir)
+    sampling_fn = sampling.get_sampling_fn(config, sde, sampling_shape, inverse_scaler, sampling_eps, workdir=this_sample_dir, use_pred_cond=use_pred_cond)
 
   # Use inceptionV3 for images with resolution higher than 256.
   inceptionv3 = config.data.image_size >= 256

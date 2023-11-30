@@ -82,7 +82,7 @@ def get_corrector(name):
   return _CORRECTORS[name]
 
 
-def get_sampling_fn(config, sde, shape, inverse_scaler, eps, workdir=None):
+def get_sampling_fn(config, sde, shape, inverse_scaler, eps, workdir=None, use_pred_cond=False):
   """Create a sampling function.
 
   Args:
@@ -122,7 +122,8 @@ def get_sampling_fn(config, sde, shape, inverse_scaler, eps, workdir=None):
                                  denoise=config.sampling.noise_removal,
                                  eps=eps,
                                  device=config.device,
-                                 workdir=workdir,)
+                                 workdir=workdir,
+                                 use_pred_cond=use_pred_cond)
   else:
     raise ValueError(f"Sampler name {sampler_name} unknown.")
 
@@ -210,14 +211,14 @@ class ReverseDiffusionPredictor(Predictor):
 class AncestralSamplingPredictor(Predictor):
   """The ancestral sampling predictor. Currently only supports VE/VP SDEs."""
 
-  def __init__(self, sde, score_fn, probability_flow=False, workdir=None, use_pre_con=False):
+  def __init__(self, sde, score_fn, probability_flow=False, workdir=None, use_pred_cond=False):
     super().__init__(sde, score_fn, probability_flow)
     if not isinstance(sde, sde_lib.VPSDE) and not isinstance(sde, sde_lib.VESDE):
       raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
     assert not probability_flow, "Probability flow not supported by ancestral sampling"
 
     self.workdir = workdir
-    self.use_pre_con = use_pre_con
+    self.use_pred_cond = use_pred_cond
 
   def vesde_update_fn(self, x, t):
     sde = self.sde
@@ -259,22 +260,21 @@ class AncestralSamplingPredictor(Predictor):
     with open(filepath_time_txt, 'a') as f_filepath_time_txt:
         f_filepath_time_txt.write(str(output_hessian_computation['time']) + '\n')
 
-    if self.use_pre_con:
+    if self.use_pred_cond:
       P_mat = H.T @ H
     else:
       P_mat = torch.eye(x.reshape(-1).shape[0])
     
-    breakpoint()
+    # breakpoint()
     
     noise = torch.randn_like(x)
 
-    if self.use_pre_con:
-      soln = torch.linalg.solve(P_mat, score)
+    if self.use_pred_cond:
+      soln = torch.linalg.solve(P_mat, score.view(-1))
       P_mat_eigvals, P_mat_eigvecs = torch.linalg.eigh(P_mat)
       soln_sqrt = P_mat_eigvecs @ torch.diag(1/torch.sqrt(P_mat_eigvals)) @ P_mat_eigvecs.T
-      x_mean = (x + beta[:, None, None, None] * soln) / torch.sqrt(1. - beta)[:, None, None, None]
-      x = x_mean + torch.sqrt(beta)[:, None, None, None] * (soln_sqrt @ noise)
-      breakpoint()
+      x_mean = (x + beta[:, None, None, None] * soln.reshape(x.shape)) / torch.sqrt(1. - beta)[:, None, None, None]
+      x = x_mean + torch.sqrt(beta)[:, None, None, None] * (soln_sqrt @ noise.view(-1)).reshape(x.shape)
     else:
       x_mean = (x + beta[:, None, None, None] * score) / torch.sqrt(1. - beta)[:, None, None, None]
       x = x_mean + torch.sqrt(beta)[:, None, None, None] * noise
@@ -410,18 +410,18 @@ class NoneCorrector(Corrector):
     return x, x
 
 
-def shared_predictor_update_fn(x, t, sde, model, predictor, probability_flow, continuous, workdir=None):
+def shared_predictor_update_fn(x, t, sde, model, predictor, probability_flow, continuous, workdir=None, use_pred_cond=False):
   """A wrapper that configures and returns the update function of predictors."""
   score_fn = mutils.get_score_fn(sde, model, train=False, continuous=continuous)
   if predictor is None:
     # Corrector-only sampler
     predictor_obj = NonePredictor(sde, score_fn, probability_flow)
   else:
-    predictor_obj = predictor(sde, score_fn, probability_flow, workdir=workdir)
+    predictor_obj = predictor(sde, score_fn, probability_flow, workdir=workdir, use_pred_cond=use_pred_cond)
   return predictor_obj.update_fn(x, t)
 
 
-def shared_corrector_update_fn(x, t, sde, model, corrector, continuous, snr, n_steps, workdir=None):
+def shared_corrector_update_fn(x, t, sde, model, corrector, continuous, snr, n_steps, workdir=None, use_pred_cond=False):
   """A wrapper tha configures and returns the update function of correctors."""
   score_fn = mutils.get_score_fn(sde, model, train=False, continuous=continuous)
   if corrector is None:
@@ -434,7 +434,7 @@ def shared_corrector_update_fn(x, t, sde, model, corrector, continuous, snr, n_s
 
 def get_pc_sampler(sde, shape, predictor, corrector, inverse_scaler, snr,
                    n_steps=1, probability_flow=False, continuous=False,
-                   denoise=True, eps=1e-3, device='cuda', workdir=None):
+                   denoise=True, eps=1e-3, device='cuda', workdir=None, use_pred_cond=False):
   """Create a Predictor-Corrector (PC) sampler.
 
   Args:
@@ -460,14 +460,16 @@ def get_pc_sampler(sde, shape, predictor, corrector, inverse_scaler, snr,
                                           predictor=predictor,
                                           probability_flow=probability_flow,
                                           continuous=continuous,
-                                          workdir=workdir)
+                                          workdir=workdir,
+                                          use_pred_cond=use_pred_cond)
   corrector_update_fn = functools.partial(shared_corrector_update_fn,
                                           sde=sde,
                                           corrector=corrector,
                                           continuous=continuous,
                                           snr=snr,
                                           n_steps=n_steps,
-                                          workdir=workdir)
+                                          workdir=workdir,
+                                          use_pred_cond=use_pred_cond)
 
   def pc_sampler(model):
     """ The PC sampler funciton.
