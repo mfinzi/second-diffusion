@@ -210,13 +210,14 @@ class ReverseDiffusionPredictor(Predictor):
 class AncestralSamplingPredictor(Predictor):
   """The ancestral sampling predictor. Currently only supports VE/VP SDEs."""
 
-  def __init__(self, sde, score_fn, probability_flow=False, workdir=None):
+  def __init__(self, sde, score_fn, probability_flow=False, workdir=None, use_pre_con=False):
     super().__init__(sde, score_fn, probability_flow)
     if not isinstance(sde, sde_lib.VPSDE) and not isinstance(sde, sde_lib.VESDE):
       raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
     assert not probability_flow, "Probability flow not supported by ancestral sampling"
 
     self.workdir = workdir
+    self.use_pre_con = use_pre_con
 
   def vesde_update_fn(self, x, t):
     sde = self.sde
@@ -235,33 +236,73 @@ class AncestralSamplingPredictor(Predictor):
     timestep = (t * (sde.N - 1) / sde.T).long()
     beta = sde.discrete_betas.to(t.device)[timestep]
     score = self.score_fn(x, t)
-    x_mean = (x + beta[:, None, None, None] * score) / torch.sqrt(1. - beta)[:, None, None, None]
+
+    print(f"(1000-timestep.item())={(1000-timestep.item())} for hessian computation", flush=True)
+    tic = time.time()
+    H = torch.autograd.functional.jacobian(partial(self.flat_score_fn,t=t), x.reshape(-1)) # it takes 26 seconds to finish this
+    H_eigvals, _ = torch.linalg.eigh(H)
+    toc = time.time()
+
+    output_hessian_computation = {"eigvals": np.array(H_eigvals.cpu()), "timestep": timestep.item(), "time": toc - tic, "method": "torch.linalg.eigvals"}
+
+    use_highest = True
+    filepath = f"{self.workdir}/eigs_sde_N{sde.N}.pkl"
+    filepath_txt = f"{self.workdir}/eigs_sde_N{sde.N}.txt"
+    filepath_time_txt = f'{self.workdir}/eigs_sde_N{sde.N}_time.txt'
+
+    protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
+
+    with open(file=filepath, mode='wb') as f:
+        pickle.dump(obj=output_hessian_computation, file=f, protocol=protocol)
+    with open(filepath_txt, 'a') as f_filepath_txt:
+        f_filepath_txt.write(str(output_hessian_computation['eigvals'].tolist()) + '\n')  
+    with open(filepath_time_txt, 'a') as f_filepath_time_txt:
+        f_filepath_time_txt.write(str(output_hessian_computation['time']) + '\n')
+
+    if self.use_pre_con:
+      P_mat = H.T @ H
+    else:
+      P_mat = torch.eye(x.reshape(-1).shape[0])
+    
+    breakpoint()
+    
     noise = torch.randn_like(x)
-    x = x_mean + torch.sqrt(beta)[:, None, None, None] * noise
+
+    if self.use_pre_con:
+      soln = torch.linalg.solve(P_mat, score)
+      P_mat_eigvals, P_mat_eigvecs = torch.linalg.eigh(P_mat)
+      soln_sqrt = P_mat_eigvecs @ torch.diag(1/torch.sqrt(P_mat_eigvals)) @ P_mat_eigvecs.T
+      x_mean = (x + beta[:, None, None, None] * soln) / torch.sqrt(1. - beta)[:, None, None, None]
+      x = x_mean + torch.sqrt(beta)[:, None, None, None] * (soln_sqrt @ noise)
+      breakpoint()
+    else:
+      x_mean = (x + beta[:, None, None, None] * score) / torch.sqrt(1. - beta)[:, None, None, None]
+      x = x_mean + torch.sqrt(beta)[:, None, None, None] * noise
 
     # Computing Hessian Eigenvalues (Every 100 Iterations)
-    if ((1000-timestep.item()) % 200) == 0 or (1000-timestep.item()) in [925, 950, 975, 990, 993, 995, 996, 997, 998, 999]:
-      print(f"(1000-timestep.item())={(1000-timestep.item())} for hessian computation", flush=True)
-      tic = time.time()
-      H = torch.autograd.functional.jacobian(partial(self.flat_score_fn,t=t), x.reshape(-1)) # it takes 26 seconds to finish this
-      H_eigvals = torch.linalg.eigvals(H) # take 4 seconds to finish this
-      toc = time.time()
+    # if ((1000-timestep.item()) % 200) == 0 or (1000-timestep.item()) in [925, 950, 975, 990, 993, 995, 996, 997, 998, 999]:
+      # print(f"(1000-timestep.item())={(1000-timestep.item())} for hessian computation", flush=True)
+      # tic = time.time()
+      # H = torch.autograd.functional.jacobian(partial(self.flat_score_fn,t=t), x.reshape(-1)) # it takes 26 seconds to finish this
+
+      # H_eigvals = torch.linalg.eigvals(H) # take 4 seconds to finish this
+      # toc = time.time()
       
-      output_hessian_computation = {"eigvals": np.array(H_eigvals.cpu()), "timestep": timestep.item(), "time": toc - tic, "method": "torch.linalg.eigvals"}
+      # output_hessian_computation = {"eigvals": np.array(H_eigvals.cpu()), "timestep": timestep.item(), "time": toc - tic, "method": "torch.linalg.eigvals"}
 
-      use_highest = True
-      filepath = f"{self.workdir}/eigs_sde_N{sde.N}.pkl"
-      filepath_txt = f"{self.workdir}/eigs_sde_N{sde.N}.txt"
-      filepath_time_txt = f'{self.workdir}/eigs_sde_N{sde.N}_time.txt'
+      # use_highest = True
+      # filepath = f"{self.workdir}/eigs_sde_N{sde.N}.pkl"
+      # filepath_txt = f"{self.workdir}/eigs_sde_N{sde.N}.txt"
+      # filepath_time_txt = f'{self.workdir}/eigs_sde_N{sde.N}_time.txt'
 
-      protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
+      # protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
 
-      with open(file=filepath, mode='wb') as f:
-          pickle.dump(obj=output_hessian_computation, file=f, protocol=protocol)
-      with open(filepath_txt, 'a') as f_filepath_txt:
-          f_filepath_txt.write(str(output_hessian_computation['eigvals'].tolist()) + '\n')  
-      with open(filepath_time_txt, 'a') as f_filepath_time_txt:
-          f_filepath_time_txt.write(str(output_hessian_computation['time']) + '\n')
+      # with open(file=filepath, mode='wb') as f:
+      #     pickle.dump(obj=output_hessian_computation, file=f, protocol=protocol)
+      # with open(filepath_txt, 'a') as f_filepath_txt:
+      #     f_filepath_txt.write(str(output_hessian_computation['eigvals'].tolist()) + '\n')  
+      # with open(filepath_time_txt, 'a') as f_filepath_time_txt:
+      #     f_filepath_time_txt.write(str(output_hessian_computation['time']) + '\n')
 
       # # TODO: work in progress  
       # H1 = cola.ops.Jacobian(partial(self.flat_score_fn,t=t), x)

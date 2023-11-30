@@ -12,11 +12,12 @@ args = parser.parse_args()
 sample_storage_path = args.sample_storage_path
 
 # some config to manually play around
-num_samples = 1
-num_hessian_samples = 3
-lst_ax1_label = [250,
-500,
-750,
+num_samples = 50
+lst_ax1_label = [
+200,
+400,
+600,
+800,
 925,
 950,
 975,
@@ -29,6 +30,8 @@ lst_ax1_label = [250,
 999,
 1000,
 ]
+
+num_hessian_samples = len(lst_ax1_label)
 
 for i in range(num_samples):
     samples_i = np.load(os.path.join(sample_storage_path, f'samples_{i}.npz'))
