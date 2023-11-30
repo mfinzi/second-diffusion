@@ -1,6 +1,8 @@
 import time
 import gc
+import re
 import numpy as np
+from datetime import datetime
 from trainkit.saving import append_timestamp
 from trainkit.saving import save_object
 import cola
@@ -39,3 +41,14 @@ def get_spectrum_results(A, alg):
         method_name = "cholesky"
     toc = time.time()
     return {"eigvals": eigvals, "time": toc - tic, "method": method_name}
+
+
+def extract_datetime(filename):
+    # date_pattern = r'eigs_(\d{4}-\d{2}-\d{2})_(\d{6})\.pkl'
+    date_pattern = r'eigs_(\d{4}-\d{2}-\d{2})_(\d{6})'
+    match = re.search(date_pattern, filename)
+    if match:
+        date_str, time_str = match.groups()
+        datetime_str = date_str + time_str
+        return datetime.strptime(datetime_str, '%Y-%m-%d%H%M%S')
+    return None

@@ -134,12 +134,9 @@ def get_matrices(x, t, key):
 
     reg_H = cola.PSD(H + eps * cola.ops.I_like(H))
     # log_spectrum_results(H, Lanczos(max_iters=20, tol=1e-3), results, output_path)
-    # log_from_jax(reg_H, output_path)
-    log_from_jax(H, output_path)
-    # inv_H = cola.linalg.inv(reg_H, alg=CG(max_iters=10, P=P))
-    # isqrt_H = cola.linalg.isqrt(reg_H, alg=Lanczos(max_iters=10))
-    inv_H = cola.ops.I_like(H)
-    isqrt_H = cola.ops.I_like(H)
+    log_from_jax(reg_H, output_path)
+    inv_H = cola.linalg.inv(reg_H, alg=CG(max_iters=10, P=P))
+    isqrt_H = cola.linalg.isqrt(reg_H, alg=Lanczos(max_iters=10))
     return inv_H, isqrt_H
 
 

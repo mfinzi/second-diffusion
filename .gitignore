@@ -163,3 +163,7 @@ cython_debug/
 
 diffusion/checkpoint_199
 diffusion/checkpoint_26
+
+score_sde_pytorch/work_dir
+score_sde_pytorch/work_dir/
+score_sde_pytorch/work_dir/*
