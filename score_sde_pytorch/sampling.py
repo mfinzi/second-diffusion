@@ -350,27 +350,37 @@ class LangevinCorrector(Corrector):
     return self.score_fn(x, t).reshape(-1)
 
   def compute_hessian_eigvals(self, x, t, i):
-    print(f"i={i} for hessian computation", flush=True)
+    # time step to log hessian eigenvalues
+    log_hessian_eigval_conditions = (i % 100 == 0) or (i in [925, 950, 975, 990, 991, 992, 993, 994, 995, 996, 997, 998, 999])
+
     tic = time.time()
-    H = torch.autograd.functional.jacobian(partial(self.flat_score_fn,t=t), x.reshape(-1)) # it takes 26 seconds to finish this
-    H_eigvals, _ = torch.linalg.eigh(H)
+    if self.use_pred_cond or log_hessian_eigval_conditions:
+      print(f"i={i} for hessian computation", flush=True)
+      H = torch.autograd.functional.jacobian(partial(self.flat_score_fn,t=t), x.reshape(-1))
+    else:
+      H = None
+
+    if log_hessian_eigval_conditions:
+      print(f"i={i} for hessian eigvals computation", flush=True)
+      H_eigvals = torch.linalg.eigvals(H)
     toc = time.time()
 
-    output_hessian_computation = {"eigvals": np.array(H_eigvals.cpu()), "timestep_i": i, "time": toc - tic, "method": "torch.linalg.eigvals"}
+    if log_hessian_eigval_conditions:
+      output_hessian_computation = {"eigvals": np.array(H_eigvals.cpu()), "timestep_i": i, "time": toc - tic, "method": "torch.linalg.eigvals"}
 
-    use_highest = True
-    filepath = f"{self.workdir}/eigs_LangevinCorrector.pkl"
-    filepath_txt = f"{self.workdir}/eigs_LangevinCorrector.txt"
-    filepath_time_txt = f'{self.workdir}/eigs_time_LangevinCorrector.txt'
+      use_highest = True
+      filepath = f"{self.workdir}/eigs_LangevinCorrector.pkl"
+      filepath_txt = f"{self.workdir}/eigs_LangevinCorrector.txt"
+      filepath_time_txt = f'{self.workdir}/eigs_time_LangevinCorrector.txt'
 
-    protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
+      protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
 
-    with open(file=filepath, mode='wb') as f:
-        pickle.dump(obj=output_hessian_computation, file=f, protocol=protocol)
-    with open(filepath_txt, 'a') as f_filepath_txt:
-        f_filepath_txt.write(str(output_hessian_computation['eigvals'].tolist()) + '\n')  
-    with open(filepath_time_txt, 'a') as f_filepath_time_txt:
-        f_filepath_time_txt.write(str(output_hessian_computation['time']) + '\n')
+      with open(file=filepath, mode='wb') as f:
+          pickle.dump(obj=output_hessian_computation, file=f, protocol=protocol)
+      with open(filepath_txt, 'a') as f_filepath_txt:
+          f_filepath_txt.write(str(output_hessian_computation['eigvals'].tolist()) + '\n')  
+      with open(filepath_time_txt, 'a') as f_filepath_time_txt:
+          f_filepath_time_txt.write(str(output_hessian_computation['time']) + '\n')
 
     return H
 
@@ -388,8 +398,6 @@ class LangevinCorrector(Corrector):
     for i in range(n_steps):
       grad = score_fn(x, t)
       H = self.compute_hessian_eigvals(x.float(), t, i)
-      # (Pdb) !grad.shape
-      # torch.Size([1, 3, 32, 32])
       noise = torch.randn_like(x)
       grad_norm = torch.norm(grad.reshape(grad.shape[0], -1), dim=-1).mean()
       noise_norm = torch.norm(noise.reshape(noise.shape[0], -1), dim=-1).mean()
@@ -456,7 +464,7 @@ class AnnealedLangevinDynamics(Corrector):
 class NoneCorrector(Corrector):
   """An empty corrector that does nothing."""
 
-  def __init__(self, sde, score_fn, snr, n_steps):
+  def __init__(self, sde, score_fn, snr, n_steps, workdir=None, use_pred_cond=False):
     pass
 
   def update_fn(self, x, t):
@@ -549,7 +557,6 @@ def get_pc_sampler(sde, shape, predictor, corrector, inverse_scaler, snr,
         x, x_mean = corrector_update_fn(x, vec_t, model=model)
         x = x.float()
         x, x_mean = predictor_update_fn(x, vec_t, model=model)
-        # breakpoint()
       return inverse_scaler(x_mean if denoise else x), sde.N * (n_steps + 1)
 
   return pc_sampler
