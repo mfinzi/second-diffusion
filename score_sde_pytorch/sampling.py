@@ -82,7 +82,7 @@ def get_corrector(name):
   return _CORRECTORS[name]
 
 
-def get_sampling_fn(config, sde, shape, inverse_scaler, eps, workdir=None):
+def get_sampling_fn(config, sde, shape, inverse_scaler, eps, workdir=None, use_pred_cond=False):
   """Create a sampling function.
 
   Args:
@@ -122,7 +122,8 @@ def get_sampling_fn(config, sde, shape, inverse_scaler, eps, workdir=None):
                                  denoise=config.sampling.noise_removal,
                                  eps=eps,
                                  device=config.device,
-                                 workdir=workdir,)
+                                 workdir=workdir,
+                                 use_pred_cond=use_pred_cond)
   else:
     raise ValueError(f"Sampler name {sampler_name} unknown.")
 
@@ -195,8 +196,10 @@ class EulerMaruyamaPredictor(Predictor):
 
 @register_predictor(name='reverse_diffusion')
 class ReverseDiffusionPredictor(Predictor):
-  def __init__(self, sde, score_fn, probability_flow=False):
+  def __init__(self, sde, score_fn, probability_flow=False, workdir=None, use_pred_cond=False):
     super().__init__(sde, score_fn, probability_flow)
+    self.workdir = workdir
+    self.use_pred_cond = use_pred_cond
 
   def update_fn(self, x, t):
     f, G = self.rsde.discretize(x, t)
@@ -210,13 +213,14 @@ class ReverseDiffusionPredictor(Predictor):
 class AncestralSamplingPredictor(Predictor):
   """The ancestral sampling predictor. Currently only supports VE/VP SDEs."""
 
-  def __init__(self, sde, score_fn, probability_flow=False, workdir=None):
+  def __init__(self, sde, score_fn, probability_flow=False, workdir=None, use_pred_cond=False):
     super().__init__(sde, score_fn, probability_flow)
     if not isinstance(sde, sde_lib.VPSDE) and not isinstance(sde, sde_lib.VESDE):
       raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
     assert not probability_flow, "Probability flow not supported by ancestral sampling"
 
     self.workdir = workdir
+    self.use_pred_cond = use_pred_cond
 
   def vesde_update_fn(self, x, t):
     sde = self.sde
@@ -235,34 +239,72 @@ class AncestralSamplingPredictor(Predictor):
     timestep = (t * (sde.N - 1) / sde.T).long()
     beta = sde.discrete_betas.to(t.device)[timestep]
     score = self.score_fn(x, t)
-    x_mean = (x + beta[:, None, None, None] * score) / torch.sqrt(1. - beta)[:, None, None, None]
+
+    print(f"(1000-timestep.item())={(1000-timestep.item())} for hessian computation", flush=True)
+    tic = time.time()
+    H = torch.autograd.functional.jacobian(partial(self.flat_score_fn,t=t), x.reshape(-1)) # it takes 26 seconds to finish this
+    H_eigvals, _ = torch.linalg.eigh(H)
+    toc = time.time()
+
+    output_hessian_computation = {"eigvals": np.array(H_eigvals.cpu()), "timestep": timestep.item(), "time": toc - tic, "method": "torch.linalg.eigvals"}
+
+    use_highest = True
+    filepath = f"{self.workdir}/eigs_sde_N{sde.N}.pkl"
+    filepath_txt = f"{self.workdir}/eigs_sde_N{sde.N}.txt"
+    filepath_time_txt = f'{self.workdir}/eigs_sde_N{sde.N}_time.txt'
+
+    protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
+
+    with open(file=filepath, mode='wb') as f:
+        pickle.dump(obj=output_hessian_computation, file=f, protocol=protocol)
+    with open(filepath_txt, 'a') as f_filepath_txt:
+        f_filepath_txt.write(str(output_hessian_computation['eigvals'].tolist()) + '\n')  
+    with open(filepath_time_txt, 'a') as f_filepath_time_txt:
+        f_filepath_time_txt.write(str(output_hessian_computation['time']) + '\n')
+
+    if self.use_pred_cond:
+      P_mat = H.T @ H
+    else:
+      P_mat = torch.eye(x.reshape(-1).shape[0])
+    
+    # breakpoint()
+    
     noise = torch.randn_like(x)
-    x = x_mean + torch.sqrt(beta)[:, None, None, None] * noise
+
+    if self.use_pred_cond:
+      soln = torch.linalg.solve(P_mat, score.view(-1))
+      P_mat_eigvals, P_mat_eigvecs = torch.linalg.eigh(P_mat)
+      soln_sqrt = P_mat_eigvecs @ torch.diag(1/torch.sqrt(P_mat_eigvals)) @ P_mat_eigvecs.T
+      x_mean = (x + beta[:, None, None, None] * soln.reshape(x.shape)) / torch.sqrt(1. - beta)[:, None, None, None]
+      x = x_mean + torch.sqrt(beta)[:, None, None, None] * (soln_sqrt @ noise.view(-1)).reshape(x.shape)
+    else:
+      x_mean = (x + beta[:, None, None, None] * score) / torch.sqrt(1. - beta)[:, None, None, None]
+      x = x_mean + torch.sqrt(beta)[:, None, None, None] * noise
 
     # Computing Hessian Eigenvalues (Every 100 Iterations)
-    if (timestep.item() % 100) == 0:
-      print(f"timestep.item()={timestep.item()} for hessian computation")
+    # if ((1000-timestep.item()) % 200) == 0 or (1000-timestep.item()) in [925, 950, 975, 990, 993, 995, 996, 997, 998, 999]:
+      # print(f"(1000-timestep.item())={(1000-timestep.item())} for hessian computation", flush=True)
+      # tic = time.time()
+      # H = torch.autograd.functional.jacobian(partial(self.flat_score_fn,t=t), x.reshape(-1)) # it takes 26 seconds to finish this
+
+      # H_eigvals = torch.linalg.eigvals(H) # take 4 seconds to finish this
+      # toc = time.time()
       
-      tic = time.time()
-      H = torch.autograd.functional.jacobian(partial(self.flat_score_fn,t=t), x.reshape(-1)) # it takes 26 seconds to finish this
-      H_eigvals = torch.linalg.eigvals(H) # take 4 seconds to finish this
-      toc = time.time()
-      
-      output_hessian_computation = {"eigvals": np.array(H_eigvals.cpu()), "timestep": timestep.item(), "time": toc - tic, "method": "torch.linalg.eigvals"}
+      # output_hessian_computation = {"eigvals": np.array(H_eigvals.cpu()), "timestep": timestep.item(), "time": toc - tic, "method": "torch.linalg.eigvals"}
 
-      use_highest = True
-      filepath = f"{self.workdir}/logs/eigs_sde_N{sde.N}.pkl"
-      filepath_txt = f"{self.workdir}/logs/eigs_sde_N{sde.N}.txt"
-      filepath_time_txt = f'{self.workdir}/logs/eigs_sde_N{sde.N}_time.txt'
+      # use_highest = True
+      # filepath = f"{self.workdir}/eigs_sde_N{sde.N}.pkl"
+      # filepath_txt = f"{self.workdir}/eigs_sde_N{sde.N}.txt"
+      # filepath_time_txt = f'{self.workdir}/eigs_sde_N{sde.N}_time.txt'
 
-      protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
+      # protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
 
-      with open(file=filepath, mode='wb') as f:
-          pickle.dump(obj=output_hessian_computation, file=f, protocol=protocol)
-      with open(filepath_txt, 'a') as f_filepath_txt:
-          f_filepath_txt.write(str(output_hessian_computation['eigvals'].tolist()) + '\n')  
-      with open(filepath_time_txt, 'a') as f_filepath_time_txt:
-          f_filepath_time_txt.write(str(output_hessian_computation['time']) + '\n')
+      # with open(file=filepath, mode='wb') as f:
+      #     pickle.dump(obj=output_hessian_computation, file=f, protocol=protocol)
+      # with open(filepath_txt, 'a') as f_filepath_txt:
+      #     f_filepath_txt.write(str(output_hessian_computation['eigvals'].tolist()) + '\n')  
+      # with open(filepath_time_txt, 'a') as f_filepath_time_txt:
+      #     f_filepath_time_txt.write(str(output_hessian_computation['time']) + '\n')
 
       # # TODO: work in progress  
       # H1 = cola.ops.Jacobian(partial(self.flat_score_fn,t=t), x)
@@ -293,12 +335,44 @@ class NonePredictor(Predictor):
 
 @register_corrector(name='langevin')
 class LangevinCorrector(Corrector):
-  def __init__(self, sde, score_fn, snr, n_steps):
+  def __init__(self, sde, score_fn, snr, n_steps, workdir = None, use_pred_cond = False):
     super().__init__(sde, score_fn, snr, n_steps)
     if not isinstance(sde, sde_lib.VPSDE) \
         and not isinstance(sde, sde_lib.VESDE) \
         and not isinstance(sde, sde_lib.subVPSDE):
       raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
+    
+    self.workdir = workdir
+    self.use_pred_cond = use_pred_cond
+
+  def flat_score_fn(self, x, t):
+    x = x.reshape(1, 3, 32, 32)
+    return self.score_fn(x, t).reshape(-1)
+
+  def compute_hessian_eigvals(self, x, t, i):
+    print(f"i={i} for hessian computation", flush=True)
+    tic = time.time()
+    H = torch.autograd.functional.jacobian(partial(self.flat_score_fn,t=t), x.reshape(-1)) # it takes 26 seconds to finish this
+    H_eigvals, _ = torch.linalg.eigh(H)
+    toc = time.time()
+
+    output_hessian_computation = {"eigvals": np.array(H_eigvals.cpu()), "timestep_i": i, "time": toc - tic, "method": "torch.linalg.eigvals"}
+
+    use_highest = True
+    filepath = f"{self.workdir}/eigs_LangevinCorrector.pkl"
+    filepath_txt = f"{self.workdir}/eigs_LangevinCorrector.txt"
+    filepath_time_txt = f'{self.workdir}/eigs_time_LangevinCorrector.txt'
+
+    protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
+
+    with open(file=filepath, mode='wb') as f:
+        pickle.dump(obj=output_hessian_computation, file=f, protocol=protocol)
+    with open(filepath_txt, 'a') as f_filepath_txt:
+        f_filepath_txt.write(str(output_hessian_computation['eigvals'].tolist()) + '\n')  
+    with open(filepath_time_txt, 'a') as f_filepath_time_txt:
+        f_filepath_time_txt.write(str(output_hessian_computation['time']) + '\n')
+
+    return H
 
   def update_fn(self, x, t):
     sde = self.sde
@@ -313,12 +387,31 @@ class LangevinCorrector(Corrector):
 
     for i in range(n_steps):
       grad = score_fn(x, t)
+      H = self.compute_hessian_eigvals(x.float(), t, i)
+      # (Pdb) !grad.shape
+      # torch.Size([1, 3, 32, 32])
       noise = torch.randn_like(x)
       grad_norm = torch.norm(grad.reshape(grad.shape[0], -1), dim=-1).mean()
       noise_norm = torch.norm(noise.reshape(noise.shape[0], -1), dim=-1).mean()
       step_size = (target_snr * noise_norm / grad_norm) ** 2 * 2 * alpha
-      x_mean = x + step_size[:, None, None, None] * grad
-      x = x_mean + torch.sqrt(step_size * 2)[:, None, None, None] * noise
+      
+      if self.use_pred_cond:
+        P_mat = H.T @ H
+      else:
+        P_mat = torch.eye(x.reshape(-1).shape[0])
+
+      # breakpoint()
+
+      if self.use_pred_cond:
+        soln = torch.linalg.solve(P_mat.double(), grad.view(-1))
+        P_mat_eigvals, P_mat_eigvecs = torch.linalg.eigh(P_mat)
+        soln_sqrt = P_mat_eigvecs @ torch.diag(1/torch.sqrt(P_mat_eigvals)) @ P_mat_eigvecs.T
+        
+        x_mean = x + step_size[:, None, None, None] * soln.reshape(x.shape)
+        x = x_mean + torch.sqrt(step_size * 2)[:, None, None, None] * (soln_sqrt @ noise.view(-1)).reshape(x.shape)
+      else:
+        x_mean = x + step_size[:, None, None, None] * grad
+        x = x_mean + torch.sqrt(step_size * 2)[:, None, None, None] * noise
 
     return x, x_mean
 
@@ -370,31 +463,31 @@ class NoneCorrector(Corrector):
     return x, x
 
 
-def shared_predictor_update_fn(x, t, sde, model, predictor, probability_flow, continuous, workdir=None):
+def shared_predictor_update_fn(x, t, sde, model, predictor, probability_flow, continuous, workdir=None, use_pred_cond=False):
   """A wrapper that configures and returns the update function of predictors."""
   score_fn = mutils.get_score_fn(sde, model, train=False, continuous=continuous)
   if predictor is None:
     # Corrector-only sampler
     predictor_obj = NonePredictor(sde, score_fn, probability_flow)
   else:
-    predictor_obj = predictor(sde, score_fn, probability_flow, workdir=workdir)
+    predictor_obj = predictor(sde, score_fn, probability_flow, workdir=workdir, use_pred_cond=use_pred_cond)
   return predictor_obj.update_fn(x, t)
 
 
-def shared_corrector_update_fn(x, t, sde, model, corrector, continuous, snr, n_steps, workdir=None):
+def shared_corrector_update_fn(x, t, sde, model, corrector, continuous, snr, n_steps, workdir=None, use_pred_cond=False):
   """A wrapper tha configures and returns the update function of correctors."""
   score_fn = mutils.get_score_fn(sde, model, train=False, continuous=continuous)
   if corrector is None:
     # Predictor-only sampler
     corrector_obj = NoneCorrector(sde, score_fn, snr, n_steps)
   else:
-    corrector_obj = corrector(sde, score_fn, snr, n_steps)
+    corrector_obj = corrector(sde, score_fn, snr, n_steps, workdir=workdir, use_pred_cond=use_pred_cond)
   return corrector_obj.update_fn(x, t)
 
 
 def get_pc_sampler(sde, shape, predictor, corrector, inverse_scaler, snr,
                    n_steps=1, probability_flow=False, continuous=False,
-                   denoise=True, eps=1e-3, device='cuda', workdir=None):
+                   denoise=True, eps=1e-3, device='cuda', workdir=None, use_pred_cond=False):
   """Create a Predictor-Corrector (PC) sampler.
 
   Args:
@@ -420,14 +513,16 @@ def get_pc_sampler(sde, shape, predictor, corrector, inverse_scaler, snr,
                                           predictor=predictor,
                                           probability_flow=probability_flow,
                                           continuous=continuous,
-                                          workdir=workdir)
+                                          workdir=workdir,
+                                          use_pred_cond=use_pred_cond)
   corrector_update_fn = functools.partial(shared_corrector_update_fn,
                                           sde=sde,
                                           corrector=corrector,
                                           continuous=continuous,
                                           snr=snr,
                                           n_steps=n_steps,
-                                          workdir=workdir)
+                                          workdir=workdir,
+                                          use_pred_cond=use_pred_cond)
 
   def pc_sampler(model):
     """ The PC sampler funciton.
@@ -445,7 +540,14 @@ def get_pc_sampler(sde, shape, predictor, corrector, inverse_scaler, snr,
       for i in range(sde.N):
         t = timesteps[i]
         vec_t = torch.ones(shape[0], device=t.device) * t
+
+        # x = x.float()
+        # vec_t = vec_t.float()
+
+        # breakpoint()
+        x = x.float()
         x, x_mean = corrector_update_fn(x, vec_t, model=model)
+        x = x.float()
         x, x_mean = predictor_update_fn(x, vec_t, model=model)
         # breakpoint()
       return inverse_scaler(x_mean if denoise else x), sde.N * (n_steps + 1)

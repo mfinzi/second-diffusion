@@ -20,6 +20,7 @@ import gc
 import io
 import os
 import time
+import datetime
 
 import numpy as np
 import tensorflow as tf
@@ -86,7 +87,7 @@ def train(config, workdir):
   # Create data normalizer and its inverse
   scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
-
+  
   # Setup SDEs
   if config.training.sde.lower() == 'vpsde':
     sde = sde_lib.VPSDE(beta_min=config.model.beta_min, beta_max=config.model.beta_max, N=config.model.num_scales)
@@ -412,7 +413,8 @@ def evaluate(config,
 
 def run_accelerated_sampling(config,
              workdir,
-             eval_folder="eval"):
+             eval_folder="eval",
+             use_pred_cond = False):
   """run_accelerated_sampling.
 
   Args:
@@ -428,16 +430,30 @@ def run_accelerated_sampling(config,
   log_dir = os.path.join(workdir, "logs")
   tf.io.gfile.makedirs(log_dir)
 
+  # ? this is a temporary change
+  if config.sampling.corrector == 'langevin':
+    ckpt = 16
+  else:
+    ckpt = config.eval.end_ckpt
+
+  now = datetime.datetime.now()
+  formatted_date = now.strftime('%Y-%m-%d')
+  formatted_time = now.strftime('%H-%M-%S')
+  logging_directory = f'{formatted_date}/{formatted_time}'
+  this_sample_dir = os.path.join(eval_dir, f"ckpt_{ckpt}", logging_directory)
+  tf.io.gfile.makedirs(this_sample_dir)
+  
+
   # Build data pipeline
-  train_ds, eval_ds, _ = datasets.get_dataset(config,
-                                              uniform_dequantization=config.data.uniform_dequantization,
-                                              evaluation=True)
+  # train_ds, eval_ds, _ = datasets.get_dataset(config,
+  #                                             uniform_dequantization=config.data.uniform_dequantization,
+  #                                             evaluation=True)
   
   # Create data normalizer and its inverse
   scaler = datasets.get_data_scaler(config)
   inverse_scaler = datasets.get_data_inverse_scaler(config)
 
-  # Initialize model
+  # Initialize model  
   score_model = mutils.create_model(config)
   optimizer = losses.get_optimizer(config, score_model.parameters())
   ema = ExponentialMovingAverage(score_model.parameters(), decay=config.model.ema_rate)
@@ -471,29 +487,29 @@ def run_accelerated_sampling(config,
                                    likelihood_weighting=likelihood_weighting)
 
 
-  # Create data loaders for likelihood evaluation. Only evaluate on uniformly dequantized data
-  train_ds_bpd, eval_ds_bpd, _ = datasets.get_dataset(config,
-                                                      uniform_dequantization=True, evaluation=True)
-  if config.eval.bpd_dataset.lower() == 'train':
-    ds_bpd = train_ds_bpd
-    bpd_num_repeats = 1
-  elif config.eval.bpd_dataset.lower() == 'test':
-    # Go over the dataset 5 times when computing likelihood on the test dataset
-    ds_bpd = eval_ds_bpd
-    bpd_num_repeats = 5
-  else:
-    raise ValueError(f"No bpd dataset {config.eval.bpd_dataset} recognized.")
+  # # Create data loaders for likelihood evaluation. Only evaluate on uniformly dequantized data
+  # train_ds_bpd, eval_ds_bpd, _ = datasets.get_dataset(config,
+  #                                                     uniform_dequantization=True, evaluation=True)
+  # if config.eval.bpd_dataset.lower() == 'train':
+  #   ds_bpd = train_ds_bpd
+  #   bpd_num_repeats = 1
+  # elif config.eval.bpd_dataset.lower() == 'test':
+  #   # Go over the dataset 5 times when computing likelihood on the test dataset
+  #   ds_bpd = eval_ds_bpd
+  #   bpd_num_repeats = 5
+  # else:
+  #   raise ValueError(f"No bpd dataset {config.eval.bpd_dataset} recognized.")
 
   # Build the likelihood computation function when likelihood is enabled
-  if config.eval.enable_bpd:
-    likelihood_fn = likelihood.get_likelihood_fn(sde, inverse_scaler)
+  # if config.eval.enable_bpd:
+  #   likelihood_fn = likelihood.get_likelihood_fn(sde, inverse_scaler)
 
   # Build the sampling function when sampling is enabled
   if config.eval.enable_sampling:
     sampling_shape = (config.eval.batch_size,
                       config.data.num_channels,
                       config.data.image_size, config.data.image_size)
-    sampling_fn = sampling.get_sampling_fn(config, sde, sampling_shape, inverse_scaler, sampling_eps, workdir=workdir)
+    sampling_fn = sampling.get_sampling_fn(config, sde, sampling_shape, inverse_scaler, sampling_eps, workdir=this_sample_dir, use_pred_cond=use_pred_cond)
 
   # Use inceptionV3 for images with resolution higher than 256.
   inceptionv3 = config.data.image_size >= 256
@@ -502,7 +518,7 @@ def run_accelerated_sampling(config,
   begin_ckpt = config.eval.begin_ckpt
   logging.info("begin checkpoint: %d" % (begin_ckpt,))
 
-  ckpt = config.eval.end_ckpt
+  # ckpt = config.eval.end_ckpt
   # Wait if the target checkpoint doesn't exist yet
   waiting_message_printed = False
   ckpt_filename = os.path.join(checkpoint_dir, "checkpoint_{}.pth".format(ckpt))
@@ -511,34 +527,24 @@ def run_accelerated_sampling(config,
     if not waiting_message_printed:
       logging.warning("Waiting for the arrival of checkpoint_%d" % (ckpt,))
       waiting_message_printed = True
-    time.sleep(60)
+    time.sleep(1)
 
   # Wait for 2 additional mins in case the file exists but is not ready for reading
   ckpt_path = os.path.join(checkpoint_dir, f'checkpoint_{ckpt}.pth')
-
-
-  # loaded_state = torch.load(ckpt_path, map_location=config.device)
-  # state['optimizer'].load_state_dict(loaded_state['optimizer'])
-  # state['model'].load_state_dict(loaded_state['model'], strict=False)
-  # state['ema'].load_state_dict(loaded_state['ema'])
-  # state['step'] = loaded_state['step']
-  # score_model.load_state_dict(loaded_state['model'], strict=False)
-  # score_fn = mutils.get_score_fn(sde, score_model, new_params, state.model_state, train=False, continuous=config.training.continuous)
   
   try:
     state = restore_checkpoint(ckpt_path, state, device=config.device)
   except:
-    time.sleep(60)
+    time.sleep(1)
     try:
       state = restore_checkpoint(ckpt_path, state, device=config.device)
     except:
-      time.sleep(120)
+      time.sleep(1)
       state = restore_checkpoint(ckpt_path, state, device=config.device)
   ema.copy_to(score_model.parameters())
 
-  # breakpoint()
   # score_fn = mutils.get_score_fn(sde, score_model, train=False, continuous=config.training.continuous)
-
+  
   # Generate samples and compute IS/FID/KID when enabled
   if config.eval.enable_sampling:
     num_sampling_rounds = config.eval.num_samples // config.eval.batch_size + 1
@@ -546,9 +552,9 @@ def run_accelerated_sampling(config,
       logging.info("sampling -- ckpt: %d, round: %d" % (ckpt, r))
 
       # Directory to save samples. Different for each host to avoid writing conflicts
-      this_sample_dir = os.path.join(
-        eval_dir, f"ckpt_{ckpt}")
-      tf.io.gfile.makedirs(this_sample_dir)
+      # this_sample_dir = os.path.join(
+      #   eval_dir, f"ckpt_{ckpt}")
+      # tf.io.gfile.makedirs(this_sample_dir)
       samples, n = sampling_fn(score_model)
       samples = np.clip(samples.permute(0, 2, 3, 1).cpu().numpy() * 255., 0, 255).astype(np.uint8)
       samples = samples.reshape(
@@ -578,7 +584,7 @@ def run_accelerated_sampling(config,
     # Load all statistics that have been previously computed and saved for each host
     all_logits = []
     all_pools = []
-    this_sample_dir = os.path.join(eval_dir, f"ckpt_{ckpt}")
+    # this_sample_dir = os.path.join(eval_dir, f"ckpt_{ckpt}") # ? yilun commented this out since we're not computing FIDs / KIDs now
     stats = tf.io.gfile.glob(os.path.join(this_sample_dir, "statistics_*.npz"))
     for stat_file in stats:
       with tf.io.gfile.GFile(stat_file, "rb") as fin:

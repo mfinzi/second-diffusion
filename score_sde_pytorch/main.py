@@ -28,6 +28,7 @@ FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file(
   "config", None, "Training configuration.", lock_config=True)
 flags.DEFINE_string("workdir", None, "Work directory.")
+flags.DEFINE_bool("use_pre_con", False, "Option to use pre-conditioning matrix.")
 flags.DEFINE_enum("mode", None, ["train", "eval", "sampling"], "Running mode: train, eval, or sampling")
 flags.DEFINE_string("eval_folder", "eval",
                     "The folder name for storing evaluation results")
@@ -53,7 +54,7 @@ def main(argv):
     # Run the evaluation pipeline
     run_lib.evaluate(FLAGS.config, FLAGS.workdir, FLAGS.eval_folder)
   elif FLAGS.mode == "sampling":
-    run_lib.run_accelerated_sampling(FLAGS.config, FLAGS.workdir, FLAGS.eval_folder)
+    run_lib.run_accelerated_sampling(FLAGS.config, FLAGS.workdir, FLAGS.eval_folder, FLAGS.use_pre_con)
   else:
     raise ValueError(f"Mode {FLAGS.mode} not recognized.")
 

@@ -94,17 +94,17 @@ key = jr.PRNGKey(101)
 diag = jnp.abs(jr.normal(key, (3072,)))
 
 
-def score_fn(x, _):
-    shape = x.shape
-    out = -x.reshape(-1)
-    out = diag * out
-    return out.reshape(shape)
+# def score_fn(x, _):
+#     shape = x.shape
+#     out = -x.reshape(-1)
+#     out = diag * out
+#     return out.reshape(shape)
 
 
 i = 0
 target_snr = 0.16
-# n_steps = 2000
 n_steps = 100
+# n_steps = 2000
 
 key = jr.PRNGKey(101)
 x_pi = jr.normal(key, (32, 32, 3))

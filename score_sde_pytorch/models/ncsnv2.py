@@ -142,10 +142,10 @@ class NCSN(nn.Module):
     self.act = act = get_act(config)
     self.config = config
 
-    self.begin_conv = nn.Conv2d(config.data.channels, nf, 3, stride=1, padding=1)
+    self.begin_conv = nn.Conv2d(config.data.num_channels, nf, 3, stride=1, padding=1)
 
     self.normalizer = self.norm(nf, config.model.num_scales)
-    self.end_conv = nn.Conv2d(nf, config.data.channels, 3, stride=1, padding=1)
+    self.end_conv = nn.Conv2d(nf, config.data.num_channels, 3, stride=1, padding=1)
 
     self.res1 = nn.ModuleList([
       ConditionalResidualBlock(self.nf, self.nf, config.model.num_scales, resample=None, act=act,

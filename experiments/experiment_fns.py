@@ -1,4 +1,5 @@
 import time
+import gc
 import re
 import numpy as np
 from datetime import datetime
@@ -11,12 +12,16 @@ from cola.linalg.decompositions.lanczos import lanczos_eigs
 def log_from_jax(A, output_path):
     tic = time.time()
     xnp = A.xnp
+    # eigvals = xnp.sum(A.to_dense())
     eigvals, _ = xnp.eigh(A.to_dense())
     # eigvals = xnp.zeros(A.shape, device=A.device, dtype=A.dtype)
     toc = time.time()
     out = {"eigvals": np.array(eigvals), "time": toc - tic, "method": "cholesky"}
     save_object(out, append_timestamp(output_path, True))
+    del eigvals
+    del out
     print("*=" * 50 + "\nSaved\n" + "*=" * 50)
+    gc.collect()
 
 
 def log_spectrum_results(A, alg, results, output_path):
