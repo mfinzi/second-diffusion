@@ -1,11 +1,9 @@
 from typing import List
 import torch
 import numpy as np
-import torch
-from diffusers import AutoencoderKL, LMSDiscreteScheduler, UNet2DConditionModel, StableDiffusionPipeline
+from diffusers import StableDiffusionPipeline
 # For video display:
 from IPython.display import clear_output, display
-from matplotlib import pyplot as plt
 from PIL import Image
 from tqdm.auto import tqdm
 from transformers import logging
