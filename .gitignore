@@ -1,4 +1,6 @@
 logs/
+score_sde_pytorch/checkpoints/
+score_sde_pytorch/eval/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
