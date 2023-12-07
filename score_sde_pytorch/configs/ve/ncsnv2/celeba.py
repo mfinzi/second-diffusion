@@ -20,43 +20,43 @@ from configs.default_celeba_configs import get_default_configs
 
 
 def get_config():
-  config = get_default_configs()
-  # training
-  training = config.training
-  training.sde = 'vesde'
-  training.continuous = False
-  # shared configs for sample generation
-  step_size = 0.0000033
-  n_steps_each = 5
-  ckpt_id = 210000
-  final_only = True
-  noise_removal = False
-  # sampling
-  sampling = config.sampling
-  sampling.method = 'pc'
-  sampling.predictor = 'none'
-  sampling.corrector = 'ald'
-  sampling.n_steps_each = 5
-  sampling.snr = 0.128
-  # model
-  model = config.model
-  model.name = 'ncsnv2_64'
-  model.scale_by_sigma = True
-  model.num_scales = 500
-  model.ema_rate = 0.999
-  model.normalization = 'InstanceNorm++'
-  model.nonlinearity = 'elu'
-  model.nf = 128
-  model.interpolation = 'bilinear'
-  # optim
-  optim = config.optim
-  optim.weight_decay = 0
-  optim.optimizer = 'Adam'
-  optim.lr = 1e-4
-  optim.beta1 = 0.9
-  optim.amsgrad = False
-  optim.eps = 1e-8
-  optim.warmup = 0
-  optim.grad_clip = -1.
+    config = get_default_configs()
+    # training
+    training = config.training
+    training.sde = 'vesde'
+    training.continuous = False
+    # shared configs for sample generation
+    step_size = 0.0000033
+    n_steps_each = 5
+    ckpt_id = 210000
+    final_only = True
+    noise_removal = False
+    # sampling
+    sampling = config.sampling
+    sampling.method = 'pc'
+    sampling.predictor = 'none'
+    sampling.corrector = 'ald'
+    sampling.n_steps_each = 5
+    sampling.snr = 0.128
+    # model
+    model = config.model
+    model.name = 'ncsnv2_64'
+    model.scale_by_sigma = True
+    model.num_scales = 500
+    model.ema_rate = 0.999
+    model.normalization = 'InstanceNorm++'
+    model.nonlinearity = 'elu'
+    model.nf = 128
+    model.interpolation = 'bilinear'
+    # optim
+    optim = config.optim
+    optim.weight_decay = 0
+    optim.optimizer = 'Adam'
+    optim.lr = 1e-4
+    optim.beta1 = 0.9
+    optim.amsgrad = False
+    optim.eps = 1e-8
+    optim.warmup = 0
+    optim.grad_clip = -1.
 
-  return config
+    return config

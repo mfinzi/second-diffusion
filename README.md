@@ -10,7 +10,7 @@ To install the environment, run
 conda env create -f environment.yml
 ```
 
-or 
+or
 ```bash
 cd [PATH]/second-diffusion
 pip install -r requirements.txt
@@ -23,7 +23,7 @@ If you are on Greene, you can also just copy the overlay image `/scratch/yk2516/
 
 ### hardware requirement
 
-I have only ran this on an A100-80GB. It's possible to run into CUDA OOM error if we're not using a 80GB GPU instance. 
+I have only ran this on an A100-80GB. It's possible to run into CUDA OOM error if we're not using a 80GB GPU instance.
 
 ### pretrained checkpoints
 
@@ -40,7 +40,7 @@ python main.py --config /scratch/yk2516/repos/diffusion_model/second-diffusion/s
 
 ### how are output files from jobs saved?
 
-All output file from running the above `main.py` command should be saved in the form of `[PATH]/second-diffusion/score_sde_pytorch/work_dir/eval/ckpt_[CKPT_NUM]/[DATE]/[TIME]`. Here is an example of the output: 
+All output file from running the above `main.py` command should be saved in the form of `[PATH]/second-diffusion/score_sde_pytorch/work_dir/eval/ckpt_[CKPT_NUM]/[DATE]/[TIME]`. Here is an example of the output:
 
 ```bash
 /scratch/yk2516/repos/diffusion_model/second-diffusion/score_sde_pytorch/work_dir/eval/ckpt_26/2023-11-24/12-42-02

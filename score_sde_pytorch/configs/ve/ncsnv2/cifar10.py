@@ -20,37 +20,37 @@ from configs.default_cifar10_configs import get_default_configs
 
 
 def get_config():
-  config = get_default_configs()
-  # training
-  training = config.training
-  training.sde = 'vesde'
-  training.continuous = False
-  # sampling
-  sampling = config.sampling
-  sampling.method = 'pc'
-  sampling.predictor = 'none'
-  sampling.corrector = 'ald'
-  sampling.n_steps_each = 5
-  sampling.snr = 0.176
-  # model
-  model = config.model
-  model.name = 'ncsnv2_64'
-  model.scale_by_sigma = True
-  model.num_scales = 232
-  model.ema_rate = 0.999
-  model.normalization = 'InstanceNorm++'
-  model.nonlinearity = 'elu'
-  model.nf = 128
-  model.interpolation = 'bilinear'
-  # optim
-  optim = config.optim
-  optim.weight_decay = 0
-  optim.optimizer = 'Adam'
-  optim.lr = 1e-4
-  optim.beta1 = 0.9
-  optim.amsgrad = False
-  optim.eps = 1e-8
-  optim.warmup = 0
-  optim.grad_clip = -1.
+    config = get_default_configs()
+    # training
+    training = config.training
+    training.sde = 'vesde'
+    training.continuous = False
+    # sampling
+    sampling = config.sampling
+    sampling.method = 'pc'
+    sampling.predictor = 'none'
+    sampling.corrector = 'ald'
+    sampling.n_steps_each = 5
+    sampling.snr = 0.176
+    # model
+    model = config.model
+    model.name = 'ncsnv2_64'
+    model.scale_by_sigma = True
+    model.num_scales = 232
+    model.ema_rate = 0.999
+    model.normalization = 'InstanceNorm++'
+    model.nonlinearity = 'elu'
+    model.nf = 128
+    model.interpolation = 'bilinear'
+    # optim
+    optim = config.optim
+    optim.weight_decay = 0
+    optim.optimizer = 'Adam'
+    optim.lr = 1e-4
+    optim.beta1 = 0.9
+    optim.amsgrad = False
+    optim.eps = 1e-8
+    optim.warmup = 0
+    optim.grad_clip = -1.
 
-  return config
+    return config

@@ -24,7 +24,6 @@ RETRAIN_MODEL = True
 SEED = 42
 key = jr.PRNGKey(SEED)
 
-
 if not os.path.exists('checkpoint_26'):
     file_id = '1VZikdcPE2nn8K_da9UUG_JPIzNIRI4yE'
     output_file = 'checkpoint_26'
@@ -91,15 +90,13 @@ score_fn = mutils.get_score_fn(sde, score_model, new_params, state.model_state, 
                                continuous=config.training.continuous)
 
 key = jr.PRNGKey(101)
-diag = jnp.abs(jr.normal(key, (3072,)))
-
+diag = jnp.abs(jr.normal(key, (3072, )))
 
 # def score_fn(x, _):
 #     shape = x.shape
 #     out = -x.reshape(-1)
 #     out = diag * out
 #     return out.reshape(shape)
-
 
 i = 0
 target_snr = 0.16
