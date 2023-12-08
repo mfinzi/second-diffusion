@@ -29,6 +29,8 @@ from models import utils as mutils
 
 from functools import partial
 import cola
+from analysis.fns import log_data
+from torch.autograd.functional import jacobian
 import time
 import pickle
 
@@ -222,47 +224,51 @@ class AncestralSamplingPredictor(Predictor):
         timestep = (t * (sde.N - 1) / sde.T).long()
         beta = sde.discrete_betas.to(t.device)[timestep]
         score = self.score_fn(x, t)
+        noise = torch.randn_like(x)
 
-        print(f"(1000-timestep.item())={(1000-timestep.item())} for hessian computation", flush=True)
+        print(f"\n(1000-timestep.item())={(1000-timestep.item())} for hessian computation", flush=True)
         tic = time.time()
-        H = torch.autograd.functional.jacobian(partial(self.flat_score_fn, t=t),
-                                               x.reshape(-1))  # it takes 26 seconds to finish this
-        H_eigvals, _ = torch.linalg.eigh(H)
+        H = jacobian(partial(self.flat_score_fn, t=t), x.reshape(-1))
+        print(f"Hessian dense took: {time.time() - tic:1.3e} sec")
+        H_eigvals, _ = torch.linalg.eig(H)
         toc = time.time()
+        iter_n = sde.N - timestep.item()
 
-        output_hessian_computation = {
+        output_H = {
             "eigvals": np.array(H_eigvals.cpu()),
+            "iter": iter_n,
             "timestep": timestep.item(),
             "time": toc - tic,
-            "method": "torch.linalg.eigvals"
+            "method": "eig"
         }
+        log_data(output_H, filepath=f"{self.workdir}/H_eigs_{iter_n}.pkl")
 
-        use_highest = True
-        filepath = f"{self.workdir}/eigs_sde_N{sde.N}.pkl"
-        filepath_txt = f"{self.workdir}/eigs_sde_N{sde.N}.txt"
-        filepath_time_txt = f'{self.workdir}/eigs_sde_N{sde.N}_time.txt'
+        P_mat = H.T @ H
+        P_mat_eigvals, P_mat_eigvecs = torch.linalg.eigh(P_mat)
+        print("Computed HTH")
+        output_HTH = {
+            "eigvals": np.array(P_mat_eigvals.cpu()),
+            "iter": iter_n,
+            "timestep": timestep.item(),
+            "time": toc - tic,
+            "method": "eigh"
+        }
+        log_data(output_HTH, filepath=f"{self.workdir}/HTH_eigs_{iter_n}.pkl")
 
-        protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
-
-        with open(file=filepath, mode='wb') as f:
-            pickle.dump(obj=output_hessian_computation, file=f, protocol=protocol)
-        with open(filepath_txt, 'a') as f_filepath_txt:
-            f_filepath_txt.write(str(output_hessian_computation['eigvals'].tolist()) + '\n')
-        with open(filepath_time_txt, 'a') as f_filepath_time_txt:
-            f_filepath_time_txt.write(str(output_hessian_computation['time']) + '\n')
-
-        if self.use_pred_cond:
-            P_mat = H.T @ H
-        else:
-            P_mat = torch.eye(x.reshape(-1).shape[0])
-
-        # breakpoint()
-
-        noise = torch.randn_like(x)
+        HHT = H.T @ H
+        eigvals, _ = torch.linalg.eigh(HHT)
+        print("Computed HHT")
+        output_HHT = {
+            "eigvals": np.array(eigvals.cpu()),
+            "iter": iter_n,
+            "timestep": timestep.item(),
+            "time": toc - tic,
+            "method": "eigh"
+        }
+        log_data(output_HHT, filepath=f"{self.workdir}/HHT_eigs_{iter_n}.pkl")
 
         if self.use_pred_cond:
             soln = torch.linalg.solve(P_mat, score.view(-1))
-            P_mat_eigvals, P_mat_eigvecs = torch.linalg.eigh(P_mat)
             soln_sqrt = P_mat_eigvecs @ torch.diag(1 / torch.sqrt(P_mat_eigvals)) @ P_mat_eigvecs.T
             x_mean = (x + beta[:, None, None, None] * soln.reshape(x.shape)) / \
                 torch.sqrt(1. - beta)[:, None, None, None]
@@ -271,39 +277,14 @@ class AncestralSamplingPredictor(Predictor):
             x_mean = (x + beta[:, None, None, None] * score) / torch.sqrt(1. - beta)[:, None, None, None]
             x = x_mean + torch.sqrt(beta)[:, None, None, None] * noise
 
-        # Computing Hessian Eigenvalues (Every 100 Iterations)
-        # if ((1000-timestep.item()) % 200) == 0 or (1000-timestep.item()) in [925, 950, 975, 990, 993, 995, 996, 997, 998, 999]:
-        # print(f"(1000-timestep.item())={(1000-timestep.item())} for hessian computation", flush=True)
-        # tic = time.time()
-        # H = torch.autograd.functional.jacobian(partial(self.flat_score_fn,t=t), x.reshape(-1)) # it takes 26 seconds to finish this
-
-        # H_eigvals = torch.linalg.eigvals(H) # take 4 seconds to finish this
-        # toc = time.time()
-
-        # output_hessian_computation = {"eigvals": np.array(H_eigvals.cpu()), "timestep": timestep.item(), "time": toc - tic, "method": "torch.linalg.eigvals"}
-
-        # use_highest = True
-        # filepath = f"{self.workdir}/eigs_sde_N{sde.N}.pkl"
-        # filepath_txt = f"{self.workdir}/eigs_sde_N{sde.N}.txt"
-        # filepath_time_txt = f'{self.workdir}/eigs_sde_N{sde.N}_time.txt'
-
-        # protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
-
-        # with open(file=filepath, mode='wb') as f:
-        #     pickle.dump(obj=output_hessian_computation, file=f, protocol=protocol)
-        # with open(filepath_txt, 'a') as f_filepath_txt:
-        #     f_filepath_txt.write(str(output_hessian_computation['eigvals'].tolist()) + '\n')
-        # with open(filepath_time_txt, 'a') as f_filepath_time_txt:
-        #     f_filepath_time_txt.write(str(output_hessian_computation['time']) + '\n')
-
-        # # TODO: work in progress
-        # H1 = cola.ops.Jacobian(partial(self.flat_score_fn,t=t), x)
-
+        log_data(np.array(x.cpu), filepath=f"{self.workdir}/x_{iter_n}.pkl")
         return x, x_mean
 
     def flat_score_fn(self, x, t):
         x = x.reshape(1, 3, 32, 32)
-        return self.score_fn(x, t).reshape(-1)
+        out = self.score_fn(x, t).reshape(-1)
+        # out = x.reshape(-1)
+        return out
 
     def update_fn(self, x, t):
         if isinstance(self.sde, sde_lib.VESDE):
@@ -403,8 +384,6 @@ class LangevinCorrector(Corrector):
                 P_mat = H.T @ H
             else:
                 P_mat = torch.eye(x.reshape(-1).shape[0])
-
-            # breakpoint()
 
             if self.use_pred_cond:
                 soln = torch.linalg.solve(P_mat.double(), grad.view(-1))
@@ -535,14 +514,7 @@ def get_pc_sampler(sde, shape, predictor, corrector, inverse_scaler, snr, n_step
             for i in range(sde.N):
                 t = timesteps[i]
                 vec_t = torch.ones(shape[0], device=t.device) * t
-
-                # x = x.float()
-                # vec_t = vec_t.float()
-
-                # breakpoint()
-                x = x.float()
                 x, x_mean = corrector_update_fn(x, vec_t, model=model)
-                x = x.float()
                 x, x_mean = predictor_update_fn(x, vec_t, model=model)
             return inverse_scaler(x_mean if denoise else x), sde.N * (n_steps + 1)
 
