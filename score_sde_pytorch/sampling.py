@@ -287,7 +287,7 @@ class AncestralSamplingPredictor(Predictor):
             x = x_mean + torch.sqrt(beta)[:, None, None, None] * noise
 
         if iter_n in checks:
-            log_data(np.array(x.cpu), filepath=f"{self.workdir}/x_{iter_n}.pkl")
+            log_data(np.array(x.cpu()), filepath=f"{self.workdir}/x_{iter_n}.pkl")
         return x, x_mean
 
     def flat_score_fn(self, x, t):

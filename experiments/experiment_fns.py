@@ -1,12 +1,39 @@
 import time
 import gc
 import re
+import os
+from os.path import join
 import numpy as np
 from datetime import datetime
 from trainkit.saving import append_timestamp
 from trainkit.saving import save_object
+from trainkit.saving import load_object
 import cola
 from cola.linalg.decompositions.lanczos import lanczos_eigs
+
+
+def get_results_with_pattern(pattern, dir_path):
+    files = get_all_files_with_pattern(pattern, dir_path)
+    data = {}
+    for file in files:
+        iter_n = get_iter(file)
+        res = load_object(join(dir_path, file))
+        data[iter_n] = res
+    return data
+
+
+def get_iter(file):
+    pattern = re.compile(r'\D*(\d+)\.pkl$')
+    match = pattern.match(file)
+    if match:
+        iter_n = match.group(1)
+    return int(iter_n)
+
+
+def get_all_files_with_pattern(pattern, dir_path):
+    pattern = re.compile(pattern)
+    files = [f for f in os.listdir(dir_path) if pattern.match(f)]
+    return files
 
 
 def log_from_jax(A, output_path):
