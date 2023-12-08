@@ -7,7 +7,8 @@ sns.set(style="whitegrid", font_scale=2.0, rc={"lines.linewidth": 3.0})
 sns.set_palette("Set1")
 
 # files = get_results_with_pattern("x_", dir_path="./logs/21-09-53/")
-res = get_results_with_pattern("H_eigs", dir_path="./logs/21-09-53/")
+res = get_results_with_pattern("H_eigs", dir_path="./logs/09-37-33/")
+# res = get_results_with_pattern("HTH_eigs", dir_path="./logs/09-37-33/")
 iter_ns = list(res.keys())
 iter_ns.sort()
 
