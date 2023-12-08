@@ -226,46 +226,55 @@ class AncestralSamplingPredictor(Predictor):
         score = self.score_fn(x, t)
         noise = torch.randn_like(x)
 
-        print(f"\n(1000-timestep.item())={(1000-timestep.item())} for hessian computation", flush=True)
-        tic = time.time()
-        H = jacobian(partial(self.flat_score_fn, t=t), x.reshape(-1))
-        print(f"Hessian dense took: {time.time() - tic:1.3e} sec")
-        H_eigvals, _ = torch.linalg.eig(H)
-        toc = time.time()
         iter_n = sde.N - timestep.item()
+        checks = [i * 100 + 1 for i in range(9)] + [900 + i * 20 for i in range(5)]
+        checks += [990 + i for i in range(11)]
+        if iter_n in checks:
+            print(f"Iter: {iter_n:,d}")
+            tic = time.time()
+            H = jacobian(partial(self.flat_score_fn, t=t), x.reshape(-1))
+            print(f"Hessian dense took: {time.time() - tic:1.3e} sec")
+            H_eigvals, _ = torch.linalg.eig(H)
+            eigvals_sorted = np.sort(np.array(torch.abs(H_eigvals).cpu()))
+            print(f"Max Eig: {eigvals_sorted[-1]:1.3e} | Min Eig: {eigvals_sorted[0]:1.3e}")
+            toc = time.time()
 
-        output_H = {
-            "eigvals": np.array(H_eigvals.cpu()),
-            "iter": iter_n,
-            "timestep": timestep.item(),
-            "time": toc - tic,
-            "method": "eig"
-        }
-        log_data(output_H, filepath=f"{self.workdir}/H_eigs_{iter_n}.pkl")
+            output_H = {
+                "eigvals": np.array(H_eigvals.cpu()),
+                "iter": iter_n,
+                "timestep": timestep.item(),
+                "time": toc - tic,
+                "method": "eig"
+            }
+            log_data(output_H, filepath=f"{self.workdir}/H_eigs_{iter_n}.pkl")
 
-        P_mat = H.T @ H
-        P_mat_eigvals, P_mat_eigvecs = torch.linalg.eigh(P_mat)
-        print("Computed HTH")
-        output_HTH = {
-            "eigvals": np.array(P_mat_eigvals.cpu()),
-            "iter": iter_n,
-            "timestep": timestep.item(),
-            "time": toc - tic,
-            "method": "eigh"
-        }
-        log_data(output_HTH, filepath=f"{self.workdir}/HTH_eigs_{iter_n}.pkl")
+            P_mat = H.T @ H
+            P_mat_eigvals, P_mat_eigvecs = torch.linalg.eigh(P_mat)
+            eigvals_sorted = np.sort(np.array(torch.abs(P_mat_eigvals).cpu()))
+            print(f"Max Eig: {eigvals_sorted[-1]:1.3e} | Min Eig: {eigvals_sorted[0]:1.3e}")
+            print("Computed HTH")
+            output_HTH = {
+                "eigvals": np.array(P_mat_eigvals.cpu()),
+                "iter": iter_n,
+                "timestep": timestep.item(),
+                "time": toc - tic,
+                "method": "eigh"
+            }
+            log_data(output_HTH, filepath=f"{self.workdir}/HTH_eigs_{iter_n}.pkl")
 
-        HHT = H.T @ H
-        eigvals, _ = torch.linalg.eigh(HHT)
-        print("Computed HHT")
-        output_HHT = {
-            "eigvals": np.array(eigvals.cpu()),
-            "iter": iter_n,
-            "timestep": timestep.item(),
-            "time": toc - tic,
-            "method": "eigh"
-        }
-        log_data(output_HHT, filepath=f"{self.workdir}/HHT_eigs_{iter_n}.pkl")
+            HHT = H.T @ H
+            eigvals, _ = torch.linalg.eigh(HHT)
+            eigvals_sorted = np.sort(np.array(torch.abs(eigvals).cpu()))
+            print(f"Max Eig: {eigvals_sorted[-1]:1.3e} | Min Eig: {eigvals_sorted[0]:1.3e}")
+            print("Computed HHT")
+            output_HHT = {
+                "eigvals": np.array(eigvals.cpu()),
+                "iter": iter_n,
+                "timestep": timestep.item(),
+                "time": toc - tic,
+                "method": "eigh"
+            }
+            log_data(output_HHT, filepath=f"{self.workdir}/HHT_eigs_{iter_n}.pkl")
 
         if self.use_pred_cond:
             soln = torch.linalg.solve(P_mat, score.view(-1))
@@ -277,7 +286,8 @@ class AncestralSamplingPredictor(Predictor):
             x_mean = (x + beta[:, None, None, None] * score) / torch.sqrt(1. - beta)[:, None, None, None]
             x = x_mean + torch.sqrt(beta)[:, None, None, None] * noise
 
-        log_data(np.array(x.cpu), filepath=f"{self.workdir}/x_{iter_n}.pkl")
+        if iter_n in checks:
+            log_data(np.array(x.cpu), filepath=f"{self.workdir}/x_{iter_n}.pkl")
         return x, x_mean
 
     def flat_score_fn(self, x, t):
