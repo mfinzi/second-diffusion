@@ -12,17 +12,12 @@ args = parser.parse_args()
 sample_storage_path = args.sample_storage_path
 
 # some config to manually play around
-num_samples = 50
+num_samples = 5
 lst_ax1_label = [
-200,
-400,
-600,
-800,
-925,
-950,
-975,
-990,
+991,
+992,
 993,
+994,
 995,
 996,
 997,
@@ -47,7 +42,7 @@ for i in range(num_samples):
     # print(f"len(loaded_data)={len(loaded_data)}")
 
     # txt
-    file_path = os.path.join(sample_storage_path, 'eigs_sde_N1000.txt')
+    file_path = os.path.join(sample_storage_path, 'eigs_AnnealedLangevinDynamics.txt')
     
     with open(file_path, 'r') as file:
         lines = file.readlines()
