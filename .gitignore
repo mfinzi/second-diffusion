@@ -167,3 +167,9 @@ diffusion/checkpoint_26
 score_sde_pytorch/work_dir
 score_sde_pytorch/work_dir/
 score_sde_pytorch/work_dir/*
+
+stable_diffusion/*png
+stable_diffusion/*txt
+stable_diffusion/*pkl
+stable_diffusion/stable_diffusion_hessian_more_iters.py
+stable_diffusion/stable_diffusion_hessian_cola.py

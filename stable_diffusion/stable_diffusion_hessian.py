@@ -9,6 +9,11 @@ from tqdm.auto import tqdm
 from transformers import logging
 import os
 
+import pdb
+import time
+from functools import partial
+import pickle
+
 torch.manual_seed(1)
 
 # Supress some unnecessary warnings when loading the CLIPTextModel
@@ -126,9 +131,6 @@ latents = torch.randn((batch_size, 4, 64, 64), generator=generator).half().to(to
 #     x = x.reshape(1, 3, 32, 32)
 #     return self.score_fn(x, t).reshape(-1)
 
-import pdb
-import time
-from functools import partial
 
 def update_latents(latents, i):
     sigma, sigma_p = interp(sigmas, i * increment), interp(sigmas, (i + 1) * increment)
@@ -139,12 +141,27 @@ def update_latents(latents, i):
     noise_pred = pred_noise(latents_in, (i + 1) * increment, text_emb)
     
     if i <= 10:
-        breakpoint()
         tic = time.time()
         H = torch.autograd.functional.jacobian(partial(flatten_score_fn,t=(i + 1) * increment,text_emb=text_emb), latents_in.reshape(-1))
-        breakpoint()
-        H_eigvals, _ = torch.linalg.eig(H)
+        H_eigvals, _ = torch.linalg.eig(H.float())
         toc = time.time()
+
+        output_hessian_computation = {"eigvals": np.array(H_eigvals.cpu()), "timestep_i": i, "time": toc - tic, "method": "torch.linalg.eigvals"}
+
+        use_highest = True
+        filepath = f"eigs_StableDiffusion.pkl"
+        filepath_txt = f"eigs_StableDiffusion.txt"
+        filepath_time_txt = f'eigs_time_StableDiffusion.txt'
+
+        protocol = pickle.HIGHEST_PROTOCOL if use_highest else pickle.DEFAULT_PROTOCOL
+
+        with open(file=filepath, mode='wb') as f:
+            pickle.dump(obj=output_hessian_computation, file=f, protocol=protocol)
+        with open(filepath_txt, 'a') as f_filepath_txt:
+            f_filepath_txt.write(str(output_hessian_computation['eigvals'].tolist()) + '\n')  
+        with open(filepath_time_txt, 'a') as f_filepath_time_txt:
+            f_filepath_time_txt.write(str(output_hessian_computation['timestep_i']) + '\n')
+
 
     return noise_pred * dsigma
 
